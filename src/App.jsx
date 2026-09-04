@@ -448,18 +448,31 @@ function PhotoUpload({ label, sub, image, onPick }) {
   );
 }
 
-function OnboardingArea({ qrBank, setQrBank, applications, setApplications }) {
-  const [step, setStep] = useState(0);
-  const [form, setForm] = useState({
-    shopName: "",
-    owner: "",
-    phone: "",
-    email: "",
-    address: "",
-    category: "salon",
-    hours: "9:00 AM – 9:00 PM (Mon–Sun)",
-    services: "Hair Cut, Hair Color, Facial, Bridal Makeup",
-  });
+function OnboardingArea({ qrBank, setQrBank, applications, setApplications, resumeApplication, onExitResume }) {
+  const [step, setStep] = useState(resumeApplication ? 1 : 0);
+  const [form, setForm] = useState(
+    resumeApplication
+      ? {
+          shopName: resumeApplication.name || "",
+          owner: resumeApplication.owner || "",
+          phone: resumeApplication.phone || "",
+          email: "",
+          address: "",
+          category: resumeApplication.category || "salon",
+          hours: "9:00 AM – 9:00 PM (Mon–Sun)",
+          services: "Hair Cut, Hair Color, Facial, Bridal Makeup",
+        }
+      : {
+          shopName: "",
+          owner: "",
+          phone: "",
+          email: "",
+          address: "",
+          category: "salon",
+          hours: "9:00 AM – 9:00 PM (Mon–Sun)",
+          services: "Hair Cut, Hair Color, Facial, Bridal Makeup",
+        }
+  );
   const [front, setFront] = useState(null);
   const [inside, setInside] = useState(null);
   const [qrInput, setQrInput] = useState("");
@@ -489,18 +502,36 @@ function OnboardingArea({ qrBank, setQrBank, applications, setApplications }) {
   };
 
   const handleSubmitApplication = () => {
-    const newApp = {
-      id: "A-" + Math.floor(100 + Math.random() * 900),
-      name: form.shopName || "Untitled Shop",
-      owner: form.owner || "—",
-      phone: form.phone || "—",
-      category: form.category,
-      city: "Begusarai",
-      date: "Today",
-      status: "approved",
-      qr: assignedQr,
-    };
-    setApplications([newApp, ...applications]);
+    if (resumeApplication) {
+      setApplications(
+        applications.map((a) =>
+          a.id === resumeApplication.id
+            ? {
+                ...a,
+                name: form.shopName || a.name,
+                owner: form.owner || a.owner,
+                phone: form.phone || a.phone,
+                category: form.category,
+                status: "approved",
+                qr: assignedQr,
+              }
+            : a
+        )
+      );
+    } else {
+      const newApp = {
+        id: "A-" + Math.floor(100 + Math.random() * 900),
+        name: form.shopName || "Untitled Shop",
+        owner: form.owner || "—",
+        phone: form.phone || "—",
+        category: form.category,
+        city: "Begusarai",
+        date: "Today",
+        status: "approved",
+        qr: assignedQr,
+      };
+      setApplications([newApp, ...applications]);
+    }
     setStep(5);
   };
 
@@ -508,6 +539,18 @@ function OnboardingArea({ qrBank, setQrBank, applications, setApplications }) {
     <div className="flex gap-10">
       <StepRail step={step} />
       <div className="flex-1 max-w-2xl">
+        {resumeApplication && (
+          <div
+            className="rounded-xl px-4 py-3 mb-5 flex items-center gap-2.5"
+            style={{ background: C.orangeSoft }}
+          >
+            <ListChecks size={16} color={C.orangeDeep} className="shrink-0" />
+            <div className="text-xs sb-body" style={{ color: C.orangeDeep }}>
+              Continuing <span className="font-semibold">{resumeApplication.name}</span> ({resumeApplication.id}) —
+              basic details already received from the partner app.
+            </div>
+          </div>
+        )}
         {/* STEP 0 — basic details */}
         {step === 0 && (
           <Card>
@@ -799,8 +842,12 @@ function OnboardingArea({ qrBank, setQrBank, applications, setApplications }) {
 
               <PrimaryButton
                 full
-                icon={LayoutGrid}
+                icon={resumeApplication ? ListChecks : LayoutGrid}
                 onClick={() => {
+                  if (resumeApplication) {
+                    onExitResume();
+                    return;
+                  }
                   setForm({
                     shopName: "",
                     owner: "",
@@ -819,7 +866,7 @@ function OnboardingArea({ qrBank, setQrBank, applications, setApplications }) {
                   setStep(0);
                 }}
               >
-                Onboard another partner
+                {resumeApplication ? "Back to Applications" : "Onboard another partner"}
               </PrimaryButton>
             </div>
           </Card>
@@ -881,7 +928,7 @@ function PreviewRow({ label, value, last }) {
 /* ---------------------------------------------------------------------- */
 /* Ops — Applications                                                      */
 /* ---------------------------------------------------------------------- */
-function ApplicationsArea({ applications, setApplications, qrBank }) {
+function ApplicationsArea({ applications, onOpenApplication }) {
   const [tab, setTab] = useState("salon");
   const [query, setQuery] = useState("");
 
@@ -895,9 +942,6 @@ function ApplicationsArea({ applications, setApplications, qrBank }) {
     approved: applications.filter((a) => a.status === "approved").length,
     rejected: applications.filter((a) => a.status === "rejected").length,
   };
-
-  const setStatus = (id, status) =>
-    setApplications(applications.map((a) => (a.id === id ? { ...a, status } : a)));
 
   return (
     <div>
@@ -958,26 +1002,16 @@ function ApplicationsArea({ applications, setApplications, qrBank }) {
                 </div>
               )}
             </div>
-            <div className="flex items-center gap-2 shrink-0">
+            <div className="flex items-center gap-3 shrink-0">
               <StatusPill status={a.status} />
-              {a.status === "pending" && (
-                <>
-                  <button
-                    onClick={() => setStatus(a.id, "approved")}
-                    className="text-xs font-bold sb-body px-3 py-2 rounded-lg"
-                    style={{ background: C.success, color: C.white }}
-                  >
-                    Approve
-                  </button>
-                  <button
-                    onClick={() => setStatus(a.id, "rejected")}
-                    className="text-xs font-bold sb-body px-3 py-2 rounded-lg"
-                    style={{ background: C.white, color: C.danger, border: `1px solid ${C.dangerSoft}` }}
-                  >
-                    Reject
-                  </button>
-                </>
-              )}
+              <button
+                onClick={() => onOpenApplication(a)}
+                className="text-xs font-bold sb-body px-4 py-2.5 rounded-lg flex items-center gap-1.5"
+                style={{ background: C.navy, color: C.white }}
+              >
+                Open Application
+                <ChevronRight size={13} />
+              </button>
             </div>
           </div>
         ))}
@@ -1132,6 +1166,7 @@ export default function App() {
   const [area, setArea] = useState("onboard");
   const [applications, setApplications] = useState(seedApplications);
   const [qrBank, setQrBank] = useState(seedQrBank);
+  const [resumeApp, setResumeApp] = useState(null);
 
   const titles = {
     onboard: { title: "New partner onboarding", sub: "Register a shop, verify it, and activate a physical QR — end to end." },
@@ -1139,10 +1174,33 @@ export default function App() {
     qrbank: { title: "QR bank", sub: "Every printed QR code and the shop it's permanently mapped to." },
   };
 
+  const currentTitle =
+    area === "onboard" && resumeApp
+      ? {
+          title: `Continue onboarding — ${resumeApp.name}`,
+          sub: "Basic details were already submitted from the partner app. Complete the remaining steps.",
+        }
+      : titles[area];
+
+  const openApplication = (app) => {
+    setResumeApp(app);
+    setArea("onboard");
+  };
+
+  const exitResume = () => {
+    setResumeApp(null);
+    setArea("applications");
+  };
+
+  const goToNewOnboarding = () => {
+    setResumeApp(null);
+    setArea("onboard");
+  };
+
   return (
     <div className="min-h-screen flex sb-body" style={{ background: C.sky }}>
       {FONTS}
-      <Sidebar area={area} setArea={setArea} />
+      <Sidebar area={area} setArea={goToNewOnboarding} />
 
       {/* mobile top nav */}
       <div className="md:hidden fixed bottom-0 left-0 right-0 z-40 flex" style={{ background: C.navyDeep }}>
@@ -1153,7 +1211,7 @@ export default function App() {
         ].map((n) => (
           <button
             key={n.k}
-            onClick={() => setArea(n.k)}
+            onClick={() => (n.k === "onboard" ? goToNewOnboarding() : (setResumeApp(null), setArea(n.k)))}
             className="flex-1 flex flex-col items-center gap-1 py-2.5"
             style={{ color: area === n.k ? C.orange : "#8B93B8" }}
           >
@@ -1164,17 +1222,20 @@ export default function App() {
       </div>
 
       <main className="flex-1 px-5 sm:px-10 py-8 pb-24 md:pb-8 max-w-6xl">
-        <TopBar title={titles[area].title} sub={titles[area].sub} />
+        <TopBar title={currentTitle.title} sub={currentTitle.sub} />
         {area === "onboard" && (
           <OnboardingArea
+            key={resumeApp ? resumeApp.id : "new"}
             qrBank={qrBank}
             setQrBank={setQrBank}
             applications={applications}
             setApplications={setApplications}
+            resumeApplication={resumeApp}
+            onExitResume={exitResume}
           />
         )}
         {area === "applications" && (
-          <ApplicationsArea applications={applications} setApplications={setApplications} qrBank={qrBank} />
+          <ApplicationsArea applications={applications} onOpenApplication={openApplication} />
         )}
         {area === "qrbank" && <QrBankArea qrBank={qrBank} setQrBank={setQrBank} applications={applications} />}
       </main>
