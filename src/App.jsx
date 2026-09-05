@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef } from "react";
+import React, { useState, useMemo, useRef, useEffect } from "react";
 import {
   Scissors,
   Stethoscope,
@@ -31,8 +31,20 @@ import {
   ListChecks,
   PlusCircle,
   X,
+  Loader2,
+  AlertTriangle,
   Image as ImageIcon,
 } from "lucide-react";
+import {
+  fetchApplications,
+  fetchQrBank,
+  createApplication,
+  assignQrToApplication,
+  markApplicationPaid,
+  setApplicationStatus,
+  lookupQr,
+  uploadShopPhoto,
+} from "./api";
 
 /* ---------------------------------------------------------------------- */
 /* Design tokens                                                          */
@@ -441,14 +453,14 @@ function PhotoUpload({ label, sub, image, onPick }) {
         className="hidden"
         onChange={(e) => {
           const f = e.target.files && e.target.files[0];
-          if (f) onPick(URL.createObjectURL(f));
+          if (f) onPick(URL.createObjectURL(f), f);
         }}
       />
     </div>
   );
 }
 
-function OnboardingArea({ qrBank, setQrBank, applications, setApplications, resumeApplication, onExitResume }) {
+function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplication, onExitResume }) {
   const [step, setStep] = useState(resumeApplication ? 1 : 0);
   const [form, setForm] = useState(
     resumeApplication
@@ -456,11 +468,11 @@ function OnboardingArea({ qrBank, setQrBank, applications, setApplications, resu
           shopName: resumeApplication.name || "",
           owner: resumeApplication.owner || "",
           phone: resumeApplication.phone || "",
-          email: "",
-          address: "",
+          email: resumeApplication.email || "",
+          address: resumeApplication.address || "",
           category: resumeApplication.category || "salon",
-          hours: "9:00 AM – 9:00 PM (Mon–Sun)",
-          services: "Hair Cut, Hair Color, Facial, Bridal Makeup",
+          hours: resumeApplication.hours || "9:00 AM – 9:00 PM (Mon–Sun)",
+          services: resumeApplication.services || "Hair Cut, Hair Color, Facial, Bridal Makeup",
         }
       : {
           shopName: "",
@@ -473,66 +485,104 @@ function OnboardingArea({ qrBank, setQrBank, applications, setApplications, resu
           services: "Hair Cut, Hair Color, Facial, Bridal Makeup",
         }
   );
-  const [front, setFront] = useState(null);
-  const [inside, setInside] = useState(null);
+  const [front, setFront] = useState(resumeApplication?.photoFront || null);
+  const [inside, setInside] = useState(resumeApplication?.photoInside || null);
+  const [frontUrl, setFrontUrl] = useState(resumeApplication?.photoFront || null);
+  const [insideUrl, setInsideUrl] = useState(resumeApplication?.photoInside || null);
+  const [uploadingFront, setUploadingFront] = useState(false);
+  const [uploadingInside, setUploadingInside] = useState(false);
+  const [serverAppId, setServerAppId] = useState(resumeApplication ? resumeApplication.id : null);
   const [qrInput, setQrInput] = useState("");
   const [qrLookup, setQrLookup] = useState(null); // {id,status} | 'notfound' | null
+  const [looking, setLooking] = useState(false);
+  const [assigning, setAssigning] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [assignedQr, setAssignedQr] = useState(null);
   const [method, setMethod] = useState("upi");
+  const [errorMsg, setErrorMsg] = useState("");
   const [txnId] = useState(() => "SBP" + Math.floor(60000000 + Math.random() * 9000000));
 
   const set = (k) => (v) => setForm((f) => ({ ...f, [k]: v }));
 
-  const handleLookup = () => {
-    const clean = qrInput.trim().toUpperCase();
-    const found = qrBank.find((q) => q.id === clean);
-    setQrLookup(found ? found : "notfound");
-  };
-
-  const handleAssign = () => {
-    if (!qrLookup || qrLookup === "notfound") return;
-    const updated = qrBank.map((q) =>
-      q.id === qrLookup.id
-        ? { ...q, status: "assigned", shop: form.shopName || "New Partner", date: "Today" }
-        : q
-    );
-    setQrBank(updated);
-    setAssignedQr(qrLookup.id);
-    setStep(4);
-  };
-
-  const handleSubmitApplication = () => {
-    if (resumeApplication) {
-      setApplications(
-        applications.map((a) =>
-          a.id === resumeApplication.id
-            ? {
-                ...a,
-                name: form.shopName || a.name,
-                owner: form.owner || a.owner,
-                phone: form.phone || a.phone,
-                category: form.category,
-                status: "approved",
-                qr: assignedQr,
-              }
-            : a
-        )
-      );
-    } else {
-      const newApp = {
-        id: "A-" + Math.floor(100 + Math.random() * 900),
-        name: form.shopName || "Untitled Shop",
-        owner: form.owner || "—",
-        phone: form.phone || "—",
-        category: form.category,
-        city: "Begusarai",
-        date: "Today",
-        status: "approved",
-        qr: assignedQr,
-      };
-      setApplications([newApp, ...applications]);
+  const handlePickFront = async (previewUrl, file) => {
+    setFront(previewUrl);
+    setUploadingFront(true);
+    setErrorMsg("");
+    try {
+      const url = await uploadShopPhoto(file);
+      setFrontUrl(url);
+    } catch (e) {
+      setErrorMsg("Photo upload failed: " + e.message);
+    } finally {
+      setUploadingFront(false);
     }
-    setStep(5);
+  };
+
+  const handlePickInside = async (previewUrl, file) => {
+    setInside(previewUrl);
+    setUploadingInside(true);
+    setErrorMsg("");
+    try {
+      const url = await uploadShopPhoto(file);
+      setInsideUrl(url);
+    } catch (e) {
+      setErrorMsg("Photo upload failed: " + e.message);
+    } finally {
+      setUploadingInside(false);
+    }
+  };
+
+  const handleLookup = async () => {
+    const clean = qrInput.trim().toUpperCase();
+    if (!clean) return;
+    setLooking(true);
+    setErrorMsg("");
+    try {
+      const found = await lookupQr(clean);
+      setQrLookup(found ? found : "notfound");
+    } catch (e) {
+      setErrorMsg("QR lookup failed: " + e.message);
+    } finally {
+      setLooking(false);
+    }
+  };
+
+  const handleAssign = async () => {
+    if (!qrLookup || qrLookup === "notfound") return;
+    setAssigning(true);
+    setErrorMsg("");
+    try {
+      let appId = serverAppId;
+      if (!appId) {
+        // No application row exists yet (fresh onboarding, not a resumed one) — create it now.
+        const created = await createApplication(form, frontUrl, insideUrl, "ops_console");
+        appId = created.id;
+        setServerAppId(appId);
+      }
+      await assignQrToApplication(appId, qrLookup.id, form.shopName || "New Partner");
+      setAssignedQr(qrLookup.id);
+      onQrBankChanged();
+      setStep(4);
+    } catch (e) {
+      setErrorMsg("QR activation failed: " + e.message);
+    } finally {
+      setAssigning(false);
+    }
+  };
+
+  const handleSubmitApplication = async () => {
+    setSubmitting(true);
+    setErrorMsg("");
+    try {
+      const appId = serverAppId;
+      await markApplicationPaid(appId, txnId, 499, method);
+      onApplicationsChanged();
+      setStep(5);
+    } catch (e) {
+      setErrorMsg("Payment confirmation failed: " + e.message);
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -608,9 +658,15 @@ function OnboardingArea({ qrBank, setQrBank, applications, setApplications, resu
               sub="Clear, real photos of the shop front and interior for verification."
             />
             <div className="grid sm:grid-cols-2 gap-4">
-              <PhotoUpload label="Shop front photo" sub="Tap to upload" image={front} onPick={setFront} />
-              <PhotoUpload label="Shop inside photo" sub="Tap to upload" image={inside} onPick={setInside} />
+              <PhotoUpload label="Shop front photo" sub={uploadingFront ? "Uploading..." : "Tap to upload"} image={front} onPick={handlePickFront} />
+              <PhotoUpload label="Shop inside photo" sub={uploadingInside ? "Uploading..." : "Tap to upload"} image={inside} onPick={handlePickInside} />
             </div>
+            {errorMsg && (
+              <div className="mt-4 rounded-xl px-4 py-3 flex items-start gap-2.5 text-xs sb-body" style={{ background: C.dangerSoft, color: C.danger }}>
+                <AlertTriangle size={15} className="mt-0.5 shrink-0" />
+                {errorMsg}
+              </div>
+            )}
             <div
               className="mt-5 rounded-xl px-4 py-3 flex items-start gap-2.5 text-xs sb-body"
               style={{ background: C.sky, color: C.slate }}
@@ -622,8 +678,8 @@ function OnboardingArea({ qrBank, setQrBank, applications, setApplications, resu
               <GhostButton icon={ChevronLeft} onClick={() => setStep(0)}>
                 Back
               </GhostButton>
-              <PrimaryButton icon={ArrowRight} onClick={() => setStep(2)}>
-                Continue
+              <PrimaryButton icon={ArrowRight} onClick={() => setStep(2)} disabled={uploadingFront || uploadingInside}>
+                {uploadingFront || uploadingInside ? "Uploading photos..." : "Continue"}
               </PrimaryButton>
             </div>
           </Card>
@@ -697,12 +753,20 @@ function OnboardingArea({ qrBank, setQrBank, applications, setApplications, resu
               </div>
               <button
                 onClick={handleLookup}
+                disabled={looking}
                 className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0"
-                style={{ background: C.navy }}
+                style={{ background: C.navy, opacity: looking ? 0.6 : 1 }}
               >
-                <ScanLine size={16} color={C.white} />
+                {looking ? <Loader2 size={16} color={C.white} className="animate-spin" /> : <ScanLine size={16} color={C.white} />}
               </button>
             </div>
+
+            {errorMsg && (
+              <div className="mb-4 rounded-xl px-4 py-3 flex items-start gap-2.5 text-xs sb-body" style={{ background: C.dangerSoft, color: C.danger }}>
+                <AlertTriangle size={15} className="mt-0.5 shrink-0" />
+                {errorMsg}
+              </div>
+            )}
 
             {qrLookup === "notfound" && (
               <LookupResult tone="danger" title="QR ID not recognised" body="Check the code on the kit and try again, or request a replacement kit." />
@@ -727,10 +791,11 @@ function OnboardingArea({ qrBank, setQrBank, applications, setApplications, resu
                     </div>
                     <button
                       onClick={handleAssign}
+                      disabled={assigning}
                       className="text-xs font-bold sb-body px-3 py-1.5 rounded-md"
-                      style={{ background: C.success, color: C.white }}
+                      style={{ background: C.success, color: C.white, opacity: assigning ? 0.6 : 1 }}
                     >
-                      Assign &amp; activate
+                      {assigning ? "Activating..." : "Assign & activate"}
                     </button>
                   </div>
                 }
@@ -742,7 +807,7 @@ function OnboardingArea({ qrBank, setQrBank, applications, setApplications, resu
                 Back
               </GhostButton>
               <div className="text-xs sb-body self-center" style={{ color: C.slateLight }}>
-                Try <span className="sb-mono font-semibold" style={{ color: C.slate }}>QR-SB-000237</span> for a demo
+                Try <span className="sb-mono font-semibold" style={{ color: C.slate }}>QR-SB-000001</span> for a demo
               </div>
             </div>
           </Card>
@@ -810,8 +875,15 @@ function OnboardingArea({ qrBank, setQrBank, applications, setApplications, resu
               ))}
             </div>
 
-            <PrimaryButton full icon={ArrowRight} onClick={handleSubmitApplication}>
-              Pay ₹499 and activate
+            {errorMsg && (
+              <div className="mb-4 rounded-xl px-4 py-3 flex items-start gap-2.5 text-xs sb-body" style={{ background: C.dangerSoft, color: C.danger }}>
+                <AlertTriangle size={15} className="mt-0.5 shrink-0" />
+                {errorMsg}
+              </div>
+            )}
+
+            <PrimaryButton full icon={ArrowRight} onClick={handleSubmitApplication} disabled={submitting}>
+              {submitting ? "Confirming payment..." : "Pay ₹499 and activate"}
             </PrimaryButton>
             <div className="text-center text-xs sb-body mt-3 flex items-center justify-center gap-1.5" style={{ color: C.slateLight }}>
               <ShieldCheck size={13} /> 100% secure payment
@@ -860,9 +932,13 @@ function OnboardingArea({ qrBank, setQrBank, applications, setApplications, resu
                   });
                   setFront(null);
                   setInside(null);
+                  setFrontUrl(null);
+                  setInsideUrl(null);
+                  setServerAppId(null);
                   setQrInput("");
                   setQrLookup(null);
                   setAssignedQr(null);
+                  setErrorMsg("");
                   setStep(0);
                 }}
               >
@@ -1028,9 +1104,11 @@ function ApplicationsArea({ applications, onOpenApplication }) {
 /* ---------------------------------------------------------------------- */
 /* Ops — QR Bank                                                           */
 /* ---------------------------------------------------------------------- */
-function QrBankArea({ qrBank, setQrBank, applications }) {
+function QrBankArea({ qrBank, applications, onDataChanged }) {
   const [query, setQuery] = useState("");
   const [assignFor, setAssignFor] = useState(null); // qr id currently being assigned
+  const [assigning, setAssigning] = useState(false);
+  const [assignError, setAssignError] = useState("");
 
   const counts = {
     total: qrBank.length,
@@ -1042,9 +1120,18 @@ function QrBankArea({ qrBank, setQrBank, applications }) {
   const filtered = qrBank.filter((q) => q.id.toLowerCase().includes(query.toLowerCase()));
   const unlinkedApproved = applications.filter((a) => a.status === "approved" && !a.qr);
 
-  const doAssign = (qrId, shopName) => {
-    setQrBank(qrBank.map((q) => (q.id === qrId ? { ...q, status: "assigned", shop: shopName, date: "Today" } : q)));
-    setAssignFor(null);
+  const doAssign = async (qrId, application) => {
+    setAssigning(true);
+    setAssignError("");
+    try {
+      await assignQrToApplication(application.id, qrId, application.name);
+      await onDataChanged();
+      setAssignFor(null);
+    } catch (e) {
+      setAssignError(e.message);
+    } finally {
+      setAssigning(false);
+    }
   };
 
   return (
@@ -1131,6 +1218,12 @@ function QrBankArea({ qrBank, setQrBank, applications }) {
             <div className="text-xs sb-body mb-3" style={{ color: C.slateLight }}>
               Approved partners waiting for a QR code
             </div>
+            {assignError && (
+              <div className="mb-3 rounded-xl px-3 py-2.5 flex items-start gap-2 text-xs sb-body" style={{ background: C.dangerSoft, color: C.danger }}>
+                <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+                {assignError}
+              </div>
+            )}
             <div className="flex flex-col gap-2 max-h-64 overflow-y-auto sb-scroll">
               {unlinkedApproved.length === 0 && (
                 <div className="text-sm sb-body py-6 text-center" style={{ color: C.slateLight }}>
@@ -1140,9 +1233,10 @@ function QrBankArea({ qrBank, setQrBank, applications }) {
               {unlinkedApproved.map((a) => (
                 <button
                   key={a.id}
-                  onClick={() => doAssign(assignFor, a.name)}
+                  onClick={() => doAssign(assignFor, a)}
+                  disabled={assigning}
                   className="flex items-center justify-between rounded-xl px-4 py-3 text-left"
-                  style={{ background: C.sky }}
+                  style={{ background: C.sky, opacity: assigning ? 0.6 : 1 }}
                 >
                   <div>
                     <div className="text-sm font-semibold sb-body" style={{ color: C.ink }}>{a.name}</div>
@@ -1164,9 +1258,40 @@ function QrBankArea({ qrBank, setQrBank, applications }) {
 /* ---------------------------------------------------------------------- */
 export default function App() {
   const [area, setArea] = useState("onboard");
-  const [applications, setApplications] = useState(seedApplications);
-  const [qrBank, setQrBank] = useState(seedQrBank);
+  const [applications, setApplications] = useState([]);
+  const [qrBank, setQrBank] = useState([]);
   const [resumeApp, setResumeApp] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+
+  const refreshApplications = async () => {
+    try {
+      setApplications(await fetchApplications());
+    } catch (e) {
+      setLoadError(e.message);
+    }
+  };
+
+  const refreshQrBank = async () => {
+    try {
+      setQrBank(await fetchQrBank());
+    } catch (e) {
+      setLoadError(e.message);
+    }
+  };
+
+  const refreshAll = async () => {
+    await Promise.all([refreshApplications(), refreshQrBank()]);
+  };
+
+  useEffect(() => {
+    (async () => {
+      setLoading(true);
+      setLoadError("");
+      await refreshAll();
+      setLoading(false);
+    })();
+  }, []);
 
   const titles = {
     onboard: { title: "New partner onboarding", sub: "Register a shop, verify it, and activate a physical QR — end to end." },
@@ -1187,9 +1312,10 @@ export default function App() {
     setArea("onboard");
   };
 
-  const exitResume = () => {
+  const exitResume = async () => {
     setResumeApp(null);
     setArea("applications");
+    await refreshApplications();
   };
 
   const goToNewOnboarding = () => {
@@ -1223,21 +1349,41 @@ export default function App() {
 
       <main className="flex-1 px-5 sm:px-10 py-8 pb-24 md:pb-8 max-w-6xl">
         <TopBar title={currentTitle.title} sub={currentTitle.sub} />
-        {area === "onboard" && (
-          <OnboardingArea
-            key={resumeApp ? resumeApp.id : "new"}
-            qrBank={qrBank}
-            setQrBank={setQrBank}
-            applications={applications}
-            setApplications={setApplications}
-            resumeApplication={resumeApp}
-            onExitResume={exitResume}
-          />
+
+        {loadError && (
+          <div
+            className="rounded-xl px-4 py-3 mb-5 flex items-start gap-2.5 text-xs sb-body"
+            style={{ background: C.dangerSoft, color: C.danger }}
+          >
+            <AlertTriangle size={15} className="mt-0.5 shrink-0" />
+            Couldn't reach the backend: {loadError}. Check that the API files are uploaded to slotb.in and the
+            database credentials in db_config.php are correct.
+          </div>
         )}
-        {area === "applications" && (
-          <ApplicationsArea applications={applications} onOpenApplication={openApplication} />
+
+        {loading ? (
+          <div className="flex items-center gap-2 text-sm sb-body py-16 justify-center" style={{ color: C.slateLight }}>
+            <Loader2 size={16} className="animate-spin" /> Loading live data...
+          </div>
+        ) : (
+          <>
+            {area === "onboard" && (
+              <OnboardingArea
+                key={resumeApp ? resumeApp.id : "new"}
+                resumeApplication={resumeApp}
+                onExitResume={exitResume}
+                onApplicationsChanged={refreshApplications}
+                onQrBankChanged={refreshQrBank}
+              />
+            )}
+            {area === "applications" && (
+              <ApplicationsArea applications={applications} onOpenApplication={openApplication} />
+            )}
+            {area === "qrbank" && (
+              <QrBankArea qrBank={qrBank} applications={applications} onDataChanged={refreshAll} />
+            )}
+          </>
         )}
-        {area === "qrbank" && <QrBankArea qrBank={qrBank} setQrBank={setQrBank} applications={applications} />}
       </main>
     </div>
   );
