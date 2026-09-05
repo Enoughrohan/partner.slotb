@@ -33,8 +33,11 @@ import {
   X,
   Loader2,
   AlertTriangle,
+  Lock,
+  LogOut,
   Image as ImageIcon,
 } from "lucide-react";
+import jsQR from "jsqr";
 import {
   fetchApplications,
   fetchQrBank,
@@ -44,6 +47,11 @@ import {
   setApplicationStatus,
   lookupQr,
   uploadShopPhoto,
+  login,
+  logout,
+  verifySession,
+  getStoredUsername,
+  AuthError,
 } from "./api";
 
 /* ---------------------------------------------------------------------- */
@@ -231,7 +239,7 @@ function GhostButton({ children, onClick, icon, small }) {
 /* ---------------------------------------------------------------------- */
 /* Sidebar                                                                 */
 /* ---------------------------------------------------------------------- */
-function Sidebar({ area, setArea }) {
+function Sidebar({ area, setArea, username, onLogout }) {
   const partnerNav = [
     { key: "onboard", label: "New Onboarding", Icon: PlusCircle },
   ];
@@ -280,6 +288,14 @@ function Sidebar({ area, setArea }) {
       </nav>
 
       <div className="mt-auto pt-6">
+        <div className="flex items-center justify-between px-1 mb-3">
+          <div className="text-xs sb-body truncate" style={{ color: "#8B93B8" }}>
+            Logged in as <span className="font-semibold" style={{ color: C.white }}>{username}</span>
+          </div>
+          <button onClick={onLogout} title="Logout" className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0" style={{ background: "#16224F" }}>
+            <LogOut size={13} color="#8B93B8" />
+          </button>
+        </div>
         <div
           className="rounded-2xl p-4"
           style={{ background: "linear-gradient(155deg, #16224F, #0B1642)", border: "1px solid #232F63" }}
@@ -411,13 +427,12 @@ function Card({ children, className = "" }) {
   );
 }
 
-function PhotoUpload({ label, sub, image, onPick }) {
+function PhotoUpload({ label, sub, image, onPick, onOpenCamera }) {
   const inputRef = useRef(null);
   return (
     <div>
       <div
-        onClick={() => inputRef.current && inputRef.current.click()}
-        className="relative rounded-xl overflow-hidden cursor-pointer flex flex-col items-center justify-center text-center"
+        className="relative rounded-xl overflow-hidden flex flex-col items-center justify-center text-center"
         style={{
           height: 170,
           background: image ? "transparent" : C.sky,
@@ -446,6 +461,24 @@ function PhotoUpload({ label, sub, image, onPick }) {
           </div>
         )}
       </div>
+      <div className="flex gap-2 mt-2">
+        <button
+          type="button"
+          onClick={onOpenCamera}
+          className="flex-1 flex items-center justify-center gap-1.5 text-xs font-semibold sb-body py-2 rounded-lg"
+          style={{ background: C.navy, color: C.white }}
+        >
+          <Camera size={13} /> {image ? "Retake" : "Take Photo"}
+        </button>
+        <button
+          type="button"
+          onClick={() => inputRef.current && inputRef.current.click()}
+          className="flex-1 flex items-center justify-center gap-1.5 text-xs font-semibold sb-body py-2 rounded-lg"
+          style={{ background: C.sky, color: C.slate, border: `1px solid ${C.line}` }}
+        >
+          <ImageIcon size={13} /> {image ? "Replace" : "Choose File"}
+        </button>
+      </div>
       <input
         ref={inputRef}
         type="file"
@@ -458,6 +491,198 @@ function PhotoUpload({ label, sub, image, onPick }) {
       />
     </div>
   );
+}
+
+function useCameraStream(constraints, active) {
+  const videoRef = useRef(null);
+  const streamRef = useRef(null);
+  const [ready, setReady] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!active) return;
+    let cancelled = false;
+    setReady(false);
+    setError("");
+
+    (async () => {
+      try {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          throw new Error("Camera is not supported in this browser.");
+        }
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        if (cancelled) {
+          stream.getTracks().forEach((t) => t.stop());
+          return;
+        }
+        streamRef.current = stream;
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          await videoRef.current.play();
+          setReady(true);
+        }
+      } catch (e) {
+        setError(
+          e.name === "NotAllowedError"
+            ? "Camera permission was denied. Allow camera access in your browser settings and try again."
+            : e.message || "Could not access the camera."
+        );
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
+      }
+    };
+  }, [active]);
+
+  return { videoRef, ready, error };
+}
+
+function CameraCaptureModal({ onCapture, onClose }) {
+  const { videoRef, ready, error } = useCameraStream({ video: { facingMode: { ideal: "environment" } }, audio: false }, true);
+
+  const capture = () => {
+    const video = videoRef.current;
+    if (!video) return;
+    const canvas = document.createElement("canvas");
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext("2d").drawImage(video, 0, 0, canvas.width, canvas.height);
+    canvas.toBlob(
+      (blob) => {
+        if (!blob) return;
+        const file = new File([blob], `shop-photo-${Date.now()}.jpg`, { type: "image/jpeg" });
+        onCapture(URL.createObjectURL(blob), file);
+      },
+      "image/jpeg",
+      0.9
+    );
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center px-4" style={{ background: "rgba(11,22,66,0.85)" }}>
+      <div className="rounded-2xl overflow-hidden w-full max-w-md" style={{ background: C.navyDeep }}>
+        <div className="flex items-center justify-between px-4 py-3.5">
+          <div className="text-sm font-semibold sb-body" style={{ color: C.white }}>Take a photo</div>
+          <button onClick={onClose} className="w-8 h-8 rounded-full flex items-center justify-center" style={{ background: "#16224F" }}>
+            <X size={15} color={C.white} />
+          </button>
+        </div>
+        <div className="relative" style={{ aspectRatio: "4 / 3", background: "#000" }}>
+          <video ref={videoRef} playsInline muted className="w-full h-full object-cover" />
+          {!ready && !error && (
+            <div className="absolute inset-0 flex items-center justify-center">
+              <Loader2 size={22} color={C.white} className="animate-spin" />
+            </div>
+          )}
+          {error && (
+            <div className="absolute inset-0 flex items-center justify-center px-6 text-center text-xs sb-body" style={{ color: C.white }}>
+              {error}
+            </div>
+          )}
+        </div>
+        <div className="px-4 py-5 flex justify-center">
+          <button
+            onClick={capture}
+            disabled={!ready}
+            className="w-16 h-16 rounded-full flex items-center justify-center"
+            style={{ background: ready ? C.orange : "#3A4270" }}
+          >
+            <Camera size={24} color={C.white} />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function QrScannerModal({ onDetect, onClose }) {
+  const { videoRef, ready, error } = useCameraStream({ video: { facingMode: { ideal: "environment" } }, audio: false }, true);
+  const canvasRef = useRef(null);
+  const rafRef = useRef(null);
+  const doneRef = useRef(false);
+
+  if (!canvasRef.current) canvasRef.current = document.createElement("canvas");
+
+  useEffect(() => {
+    if (!ready) return;
+    doneRef.current = false;
+
+    const tick = () => {
+      if (doneRef.current) return;
+      const video = videoRef.current;
+      if (video && video.readyState === video.HAVE_ENOUGH_DATA) {
+        const canvas = canvasRef.current;
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const code = jsQR(imageData.data, imageData.width, imageData.height);
+        if (code && code.data) {
+          doneRef.current = true;
+          onDetect(code.data);
+          return;
+        }
+      }
+      rafRef.current = requestAnimationFrame(tick);
+    };
+    rafRef.current = requestAnimationFrame(tick);
+
+    return () => {
+      doneRef.current = true;
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    };
+  }, [ready]);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center px-4" style={{ background: "rgba(11,22,66,0.85)" }}>
+      <div className="rounded-2xl overflow-hidden w-full max-w-md" style={{ background: C.navyDeep }}>
+        <div className="flex items-center justify-between px-4 py-3.5">
+          <div className="text-sm font-semibold sb-body" style={{ color: C.white }}>Scan partner QR</div>
+          <button onClick={onClose} className="w-8 h-8 rounded-full flex items-center justify-center" style={{ background: "#16224F" }}>
+            <X size={15} color={C.white} />
+          </button>
+        </div>
+        <div className="relative" style={{ aspectRatio: "4 / 3", background: "#000" }}>
+          <video ref={videoRef} playsInline muted className="w-full h-full object-cover" />
+          {ready && (
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <div className="w-48 h-48 rounded-2xl" style={{ border: `3px solid ${C.orange}` }} />
+            </div>
+          )}
+          {!ready && !error && (
+            <div className="absolute inset-0 flex items-center justify-center">
+              <Loader2 size={22} color={C.white} className="animate-spin" />
+            </div>
+          )}
+          {error && (
+            <div className="absolute inset-0 flex items-center justify-center px-6 text-center text-xs sb-body" style={{ color: C.white }}>
+              {error}
+            </div>
+          )}
+        </div>
+        <div className="px-4 py-4 text-center text-xs sb-body" style={{ color: "#8B93B8" }}>
+          Point the camera at the QR code printed on the partner kit.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function extractQrId(raw) {
+  const trimmed = (raw || "").trim();
+  try {
+    const url = new URL(trimmed);
+    const parts = url.pathname.split("/").filter(Boolean);
+    return (parts[parts.length - 1] || trimmed).toUpperCase();
+  } catch {
+    return trimmed.toUpperCase();
+  }
 }
 
 function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplication, onExitResume }) {
@@ -501,6 +726,8 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
   const [method, setMethod] = useState("upi");
   const [errorMsg, setErrorMsg] = useState("");
   const [txnId] = useState(() => "SBP" + Math.floor(60000000 + Math.random() * 9000000));
+  const [scannerOpen, setScannerOpen] = useState(false);
+  const [cameraFor, setCameraFor] = useState(null); // "front" | "inside" | null
 
   const set = (k) => (v) => setForm((f) => ({ ...f, [k]: v }));
 
@@ -547,8 +774,9 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
     }
   };
 
-  const handleAssign = async () => {
-    if (!qrLookup || qrLookup === "notfound") return;
+  const handleAssign = async (qrOverride) => {
+    const target = qrOverride || qrLookup;
+    if (!target || target === "notfound") return;
     setAssigning(true);
     setErrorMsg("");
     try {
@@ -559,14 +787,33 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
         appId = created.id;
         setServerAppId(appId);
       }
-      await assignQrToApplication(appId, qrLookup.id, form.shopName || "New Partner");
-      setAssignedQr(qrLookup.id);
+      await assignQrToApplication(appId, target.id, form.shopName || "New Partner");
+      setAssignedQr(target.id);
       onQrBankChanged();
       setStep(4);
     } catch (e) {
       setErrorMsg("QR activation failed: " + e.message);
     } finally {
       setAssigning(false);
+    }
+  };
+
+  const handleScanResult = async (rawValue) => {
+    setScannerOpen(false);
+    const clean = extractQrId(rawValue);
+    setQrInput(clean);
+    setLooking(true);
+    setErrorMsg("");
+    try {
+      const found = await lookupQr(clean);
+      setQrLookup(found ? found : "notfound");
+      if (found && found.status === "available") {
+        await handleAssign(found);
+      }
+    } catch (e) {
+      setErrorMsg("QR lookup failed: " + e.message);
+    } finally {
+      setLooking(false);
     }
   };
 
@@ -658,8 +905,8 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
               sub="Clear, real photos of the shop front and interior for verification."
             />
             <div className="grid sm:grid-cols-2 gap-4">
-              <PhotoUpload label="Shop front photo" sub={uploadingFront ? "Uploading..." : "Tap to upload"} image={front} onPick={handlePickFront} />
-              <PhotoUpload label="Shop inside photo" sub={uploadingInside ? "Uploading..." : "Tap to upload"} image={inside} onPick={handlePickInside} />
+              <PhotoUpload label="Shop front photo" sub={uploadingFront ? "Uploading..." : "Tap to upload"} image={front} onPick={handlePickFront} onOpenCamera={() => setCameraFor("front")} />
+              <PhotoUpload label="Shop inside photo" sub={uploadingInside ? "Uploading..." : "Tap to upload"} image={inside} onPick={handlePickInside} onOpenCamera={() => setCameraFor("inside")} />
             </div>
             {errorMsg && (
               <div className="mt-4 rounded-xl px-4 py-3 flex items-start gap-2.5 text-xs sb-body" style={{ background: C.dangerSoft, color: C.danger }}>
@@ -729,6 +976,18 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
               sub="Every printed QR card carries a unique ID. Enter or scan it to link this exact code to this shop — permanently."
             />
 
+            <button
+              onClick={() => setScannerOpen(true)}
+              className="w-full flex items-center justify-center gap-2 text-sm font-bold sb-body py-3.5 rounded-xl mb-4"
+              style={{ background: C.navy, color: C.white }}
+            >
+              <ScanLine size={16} /> Scan QR with camera
+            </button>
+
+            <div className="text-center text-xs sb-body mb-4" style={{ color: C.slateLight }}>
+              — or enter the code manually —
+            </div>
+
             <div
               className="rounded-xl px-4 py-3.5 flex items-center gap-3 mb-5"
               style={{ background: C.sky, border: `1px solid ${C.line}` }}
@@ -757,7 +1016,7 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
                 className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0"
                 style={{ background: C.navy, opacity: looking ? 0.6 : 1 }}
               >
-                {looking ? <Loader2 size={16} color={C.white} className="animate-spin" /> : <ScanLine size={16} color={C.white} />}
+                {looking ? <Loader2 size={16} color={C.white} className="animate-spin" /> : <Search size={16} color={C.white} />}
               </button>
             </div>
 
@@ -948,6 +1207,21 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
           </Card>
         )}
       </div>
+
+      {cameraFor && (
+        <CameraCaptureModal
+          onClose={() => setCameraFor(null)}
+          onCapture={(url, file) => {
+            if (cameraFor === "front") handlePickFront(url, file);
+            else handlePickInside(url, file);
+            setCameraFor(null);
+          }}
+        />
+      )}
+
+      {scannerOpen && (
+        <QrScannerModal onClose={() => setScannerOpen(false)} onDetect={handleScanResult} />
+      )}
     </div>
   );
 }
@@ -1254,9 +1528,108 @@ function QrBankArea({ qrBank, applications, onDataChanged }) {
 }
 
 /* ---------------------------------------------------------------------- */
+/* Login                                                                   */
+/* ---------------------------------------------------------------------- */
+function LoginPage({ onLoggedIn }) {
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [showPw, setShowPw] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!username.trim() || !password) return;
+    setBusy(true);
+    setError("");
+    try {
+      const loggedInUsername = await login(username.trim(), password);
+      onLoggedIn(loggedInUsername);
+    } catch (e) {
+      setError(e.message || "Login failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen flex items-center justify-center px-5" style={{ background: C.navyDeep }}>
+      {FONTS}
+      <form
+        onSubmit={submit}
+        className="w-full max-w-sm rounded-2xl p-8"
+        style={{ background: C.white }}
+      >
+        <div className="flex items-center gap-2 mb-1">
+          <div className="w-9 h-9 rounded-lg flex items-center justify-center" style={{ background: C.navy }}>
+            <ShieldCheck size={18} color={C.white} />
+          </div>
+          <div className="sb-display font-extrabold text-xl" style={{ color: C.ink }}>
+            slotb
+          </div>
+        </div>
+        <div className="text-xs sb-body mb-6" style={{ color: C.slateLight }}>
+          Partner Onboarding — Ops Console
+        </div>
+
+        <div className="sb-display font-bold text-lg mb-5" style={{ color: C.ink }}>
+          Login to continue
+        </div>
+
+        {error && (
+          <div className="rounded-xl px-4 py-3 mb-4 flex items-start gap-2.5 text-xs sb-body" style={{ background: C.dangerSoft, color: C.danger }}>
+            <AlertTriangle size={15} className="mt-0.5 shrink-0" />
+            {error}
+          </div>
+        )}
+
+        <label className="text-xs font-semibold sb-body mb-1.5 block" style={{ color: C.slate }}>
+          Username
+        </label>
+        <div className="flex items-center gap-2 rounded-xl px-3.5 py-3 mb-4" style={{ background: C.sky }}>
+          <User size={15} color={C.slateLight} />
+          <input
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            placeholder="slotb-admin"
+            autoFocus
+            className="w-full bg-transparent outline-none text-sm sb-body"
+            style={{ color: C.ink }}
+          />
+        </div>
+
+        <label className="text-xs font-semibold sb-body mb-1.5 block" style={{ color: C.slate }}>
+          Password
+        </label>
+        <div className="flex items-center gap-2 rounded-xl px-3.5 py-3 mb-6" style={{ background: C.sky }}>
+          <Lock size={15} color={C.slateLight} />
+          <input
+            type={showPw ? "text" : "password"}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="••••••••"
+            className="w-full bg-transparent outline-none text-sm sb-body"
+            style={{ color: C.ink }}
+          />
+          <button type="button" onClick={() => setShowPw((s) => !s)} className="text-xs font-semibold sb-body shrink-0" style={{ color: C.navy }}>
+            {showPw ? "Hide" : "Show"}
+          </button>
+        </div>
+
+        <PrimaryButton full icon={ArrowRight} disabled={busy}>
+          {busy ? "Logging in..." : "Login"}
+        </PrimaryButton>
+      </form>
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------------- */
 /* App                                                                     */
 /* ---------------------------------------------------------------------- */
 export default function App() {
+  const [authChecked, setAuthChecked] = useState(false);
+  const [username, setUsername] = useState(null);
   const [area, setArea] = useState("onboard");
   const [applications, setApplications] = useState([]);
   const [qrBank, setQrBank] = useState([]);
@@ -1264,11 +1637,19 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
 
+  const handleAuthError = (e) => {
+    if (e instanceof AuthError) {
+      setUsername(null);
+      return true;
+    }
+    return false;
+  };
+
   const refreshApplications = async () => {
     try {
       setApplications(await fetchApplications());
     } catch (e) {
-      setLoadError(e.message);
+      if (!handleAuthError(e)) setLoadError(e.message);
     }
   };
 
@@ -1276,7 +1657,7 @@ export default function App() {
     try {
       setQrBank(await fetchQrBank());
     } catch (e) {
-      setLoadError(e.message);
+      if (!handleAuthError(e)) setLoadError(e.message);
     }
   };
 
@@ -1286,12 +1667,36 @@ export default function App() {
 
   useEffect(() => {
     (async () => {
+      const existingUsername = getStoredUsername();
+      if (existingUsername) {
+        const verified = await verifySession();
+        setUsername(verified);
+      }
+      setAuthChecked(true);
+    })();
+  }, []);
+
+  useEffect(() => {
+    if (!username) return;
+    (async () => {
       setLoading(true);
       setLoadError("");
       await refreshAll();
       setLoading(false);
     })();
-  }, []);
+  }, [username]);
+
+  if (!authChecked) {
+    return (
+      <div className="min-h-screen flex items-center justify-center" style={{ background: C.navyDeep }}>
+        <Loader2 size={22} color={C.white} className="animate-spin" />
+      </div>
+    );
+  }
+
+  if (!username) {
+    return <LoginPage onLoggedIn={setUsername} />;
+  }
 
   const titles = {
     onboard: { title: "New partner onboarding", sub: "Register a shop, verify it, and activate a physical QR — end to end." },
@@ -1326,7 +1731,15 @@ export default function App() {
   return (
     <div className="min-h-screen flex sb-body" style={{ background: C.sky }}>
       {FONTS}
-      <Sidebar area={area} setArea={goToNewOnboarding} />
+      <Sidebar
+        area={area}
+        setArea={goToNewOnboarding}
+        username={username}
+        onLogout={async () => {
+          await logout();
+          setUsername(null);
+        }}
+      />
 
       {/* mobile top nav */}
       <div className="md:hidden fixed bottom-0 left-0 right-0 z-40 flex" style={{ background: C.navyDeep }}>
