@@ -817,12 +817,15 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
     }
   };
 
+  const [paymentResult, setPaymentResult] = useState(null);
+
   const handleSubmitApplication = async () => {
     setSubmitting(true);
     setErrorMsg("");
     try {
       const appId = serverAppId;
-      await markApplicationPaid(appId, txnId, 499, method);
+      const result = await markApplicationPaid(appId, txnId, 499, method);
+      setPaymentResult(result);
       onApplicationsChanged();
       setStep(5);
     } catch (e) {
@@ -1168,8 +1171,24 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
                 <Row k="Shop" v={form.shopName || "—"} />
                 <Row k="QR ID" v={assignedQr} mono />
                 <Row k="Transaction ID" v={"#" + txnId} mono />
-                <Row k="Amount paid" v="₹499" last />
+                <Row k="Amount paid" v="₹499" last={!paymentResult?.partner_id} />
+                {paymentResult?.partner_id && <Row k="Partner login ID" v={paymentResult.partner_id} mono last />}
               </div>
+
+              {paymentResult?.partner_id && (
+                <div
+                  className="w-full rounded-xl px-4 py-3 mt-3 flex items-start gap-2.5 text-xs sb-body text-left"
+                  style={{
+                    background: paymentResult.welcome_email_sent ? C.successSoft : C.amberSoft,
+                    color: paymentResult.welcome_email_sent ? C.success : C.amber,
+                  }}
+                >
+                  {paymentResult.welcome_email_sent ? <CheckCircle2 size={15} className="mt-0.5 shrink-0" /> : <AlertTriangle size={15} className="mt-0.5 shrink-0" />}
+                  {paymentResult.welcome_email_sent
+                    ? "Login ID and password have been emailed to the partner."
+                    : "Partner account was created, but the welcome email could not be sent — check the shop's email address, then share the login ID manually if needed."}
+                </div>
+              )}
 
               <PrimaryButton
                 full
@@ -1194,6 +1213,7 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
                   setFrontUrl(null);
                   setInsideUrl(null);
                   setServerAppId(null);
+                  setPaymentResult(null);
                   setQrInput("");
                   setQrLookup(null);
                   setAssignedQr(null);
