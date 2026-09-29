@@ -255,6 +255,26 @@ export async function lookupQr(qrId) {
   return normalizeQr(row);
 }
 
+/* ---------------------------- Email OTP -------------------------------- */
+
+export async function sendOnboardingOtp(email) {
+  const res = await fetch(`${API_BASE}/api_onboarding_otp.php`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ action: "send_otp", email }),
+  });
+  return handle(res); // { sent: true }
+}
+
+export async function verifyOnboardingOtp(email, code) {
+  const res = await fetch(`${API_BASE}/api_onboarding_otp.php`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ action: "verify_otp", email, code }),
+  });
+  return handle(res); // { verified: true }
+}
+
 /* ------------------------------- Photos --------------------------------- */
 
 export async function uploadShopPhoto(file) {
