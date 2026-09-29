@@ -35,6 +35,14 @@ import {
   AlertTriangle,
   Lock,
   LogOut,
+  Dumbbell,
+  BookOpen,
+  Wrench,
+  Plus,
+  Trash2,
+  Users,
+  IndianRupee,
+  Check,
   Image as ImageIcon,
 } from "lucide-react";
 import jsQR from "jsqr";
@@ -47,6 +55,8 @@ import {
   setApplicationStatus,
   lookupQr,
   uploadShopPhoto,
+  fetchCategories,
+  fetchCategoryServices,
   login,
   logout,
   verifySession,
@@ -234,6 +244,260 @@ function GhostButton({ children, onClick, icon, small }) {
       {children}
     </button>
   );
+}
+
+/* ---------------------------------------------------------------------- */
+/* Category model + category-specific form pieces                          */
+/* ---------------------------------------------------------------------- */
+
+// These three behave differently from salons / individual services.
+const MEMBER_CATS = ["Gym", "Library", "Doctor"];
+
+// Decide how the onboarding form should behave for a given category.
+//   "salon"   -> Men/Women/Unisex + service picker
+//   "member"  -> Gym / Library / Doctor structured fields
+//   "service" -> individual services (AC, Plumber…) service picker
+function catGroup(name, kind) {
+  if (MEMBER_CATS.includes(name)) return "member";
+  const n = (name || "").toLowerCase();
+  if (kind === "salon" || n.includes("salon") || n.includes("parlour")) return "salon";
+  return "service";
+}
+
+function catIcon(name) {
+  if (MEMBER_CATS.includes(name)) {
+    if (name === "Gym") return Dumbbell;
+    if (name === "Library") return BookOpen;
+    if (name === "Doctor") return Stethoscope;
+  }
+  const n = (name || "").toLowerCase();
+  if (n.includes("salon") || n.includes("parlour")) return Scissors;
+  return Wrench;
+}
+
+const SALON_TYPES = [
+  { value: "mens", label: "Men's" },
+  { value: "womens", label: "Women's" },
+  { value: "unisex", label: "Unisex" },
+];
+
+function SelectField({ label, icon, value, onChange, options, placeholder = "Select…" }) {
+  return (
+    <FieldShell label={label} icon={icon}>
+      <select
+        value={value || ""}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full bg-transparent outline-none text-sm sb-body"
+        style={{ color: value ? C.ink : C.slateLight }}
+      >
+        <option value="">{placeholder}</option>
+        {options.map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+    </FieldShell>
+  );
+}
+
+// A small add/remove list of structured rows (plans, seat types, shifts…).
+function RepeatRows({ label, cols, rows, onChange, addLabel = "Add row" }) {
+  const update = (i, k, v) => onChange(rows.map((r, idx) => (idx === i ? { ...r, [k]: v } : r)));
+  const add = () => onChange([...rows, cols.reduce((a, c) => ({ ...a, [c.key]: "" }), {})]);
+  const remove = (i) => onChange(rows.filter((_, idx) => idx !== i));
+  return (
+    <div>
+      <label className="text-xs font-semibold sb-body block mb-1.5" style={{ color: C.slate }}>
+        {label}
+      </label>
+      <div className="flex flex-col gap-2">
+        {rows.map((row, i) => (
+          <div key={i} className="flex items-center gap-2">
+            {cols.map((c) => (
+              <input
+                key={c.key}
+                value={row[c.key] ?? ""}
+                onChange={(e) => update(i, c.key, e.target.value)}
+                placeholder={c.placeholder}
+                type={c.type || "text"}
+                className="flex-1 min-w-0 bg-transparent outline-none text-sm sb-body rounded-xl px-3 py-2.5"
+                style={{ background: C.sky, border: `1px solid ${C.line}`, color: C.ink }}
+              />
+            ))}
+            <button
+              onClick={() => remove(i)}
+              className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0"
+              style={{ background: C.dangerSoft }}
+              title="Remove"
+            >
+              <Trash2 size={15} color={C.danger} />
+            </button>
+          </div>
+        ))}
+      </div>
+      <button
+        onClick={add}
+        className="mt-2 inline-flex items-center gap-1.5 text-xs font-semibold sb-body px-3 py-2 rounded-lg"
+        style={{ background: C.sky, color: C.navy, border: `1px solid ${C.line}` }}
+      >
+        <Plus size={14} /> {addLabel}
+      </button>
+    </div>
+  );
+}
+
+// Service catalog picker for salon + individual-service categories.
+function ServicePicker({ catalog, loading, selected, onChange }) {
+  const isPicked = (name) => selected.some((s) => s.name === name);
+  const toggle = (svc) => {
+    if (isPicked(svc.name)) {
+      onChange(selected.filter((s) => s.name !== svc.name));
+    } else {
+      onChange([...selected, { id: svc.id ?? null, name: svc.name, price: svc.price ?? "" }]);
+    }
+  };
+  const setPrice = (name, price) => onChange(selected.map((s) => (s.name === name ? { ...s, price } : s)));
+
+  return (
+    <div>
+      <label className="text-xs font-semibold sb-body block mb-1.5" style={{ color: C.slate }}>
+        Services offered — tap to select, then set price
+      </label>
+
+      {loading ? (
+        <div className="flex items-center gap-2 text-xs sb-body py-4" style={{ color: C.slateLight }}>
+          <Loader2 size={14} className="animate-spin" /> Loading services…
+        </div>
+      ) : catalog.length === 0 ? (
+        <div className="text-xs sb-body rounded-xl px-3 py-3" style={{ background: C.sky, color: C.slate }}>
+          No services listed for this category yet. Admin can add them in the panel.
+        </div>
+      ) : (
+        <div className="flex flex-wrap gap-2 mb-3">
+          {catalog.map((svc) => {
+            const on = isPicked(svc.name);
+            return (
+              <button
+                key={svc.id ?? svc.name}
+                onClick={() => toggle(svc)}
+                className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold sb-body"
+                style={{
+                  background: on ? C.navy : C.sky,
+                  color: on ? C.white : C.slate,
+                  border: `1px solid ${on ? C.navy : C.line}`,
+                }}
+              >
+                {on && <Check size={13} />}
+                {svc.name}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {selected.length > 0 && (
+        <div className="flex flex-col gap-2">
+          {selected.map((s) => (
+            <div key={s.name} className="flex items-center gap-2">
+              <div className="flex-1 text-sm sb-body truncate" style={{ color: C.ink }}>
+                {s.name}
+              </div>
+              <div
+                className="flex items-center gap-1.5 rounded-lg px-2.5 py-2"
+                style={{ background: C.sky, border: `1px solid ${C.line}` }}
+              >
+                <IndianRupee size={13} color={C.slateLight} />
+                <input
+                  value={s.price ?? ""}
+                  onChange={(e) => setPrice(s.name, e.target.value)}
+                  placeholder="Price"
+                  type="number"
+                  className="w-20 bg-transparent outline-none text-sm sb-body"
+                  style={{ color: C.ink }}
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Structured detail fields for Gym / Library / Doctor.
+function DetailFields({ group, category, detail, setDetail }) {
+  const d = (k) => (v) => setDetail({ ...detail, [k]: v });
+  const dv = (k, def = "") => detail[k] ?? def;
+
+  if (group !== "member") return null;
+
+  if (category === "Doctor") {
+    return (
+      <div className="grid sm:grid-cols-2 gap-4 mt-4">
+        <TextField label="Specialization" icon={Stethoscope} value={dv("specialization")} onChange={d("specialization")} placeholder="Dentist, Physician…" />
+        <TextField label="Qualification" icon={ListChecks} value={dv("qualification")} onChange={d("qualification")} placeholder="MBBS, MD…" />
+        <TextField label="Medical reg. no." icon={ShieldCheck} value={dv("regNo")} onChange={d("regNo")} placeholder="Registration number" />
+        <TextField label="Consultation fee (₹)" icon={IndianRupee} value={dv("consultationFee")} onChange={d("consultationFee")} type="number" placeholder="300" />
+        <TextField label="Slot duration (min)" icon={Clock} value={dv("slotDuration")} onChange={d("slotDuration")} type="number" placeholder="15" />
+        <TextField label="Available days" icon={Clock} value={dv("days")} onChange={d("days")} placeholder="Mon–Sat" />
+      </div>
+    );
+  }
+
+  if (category === "Gym") {
+    return (
+      <div className="flex flex-col gap-4 mt-4">
+        <div className="grid sm:grid-cols-2 gap-4">
+          <TextField label="Number of batches" icon={Users} value={dv("batchCount")} onChange={d("batchCount")} type="number" placeholder="3" />
+          <TextField label="Batch timings" icon={Clock} value={dv("batchTimings")} onChange={d("batchTimings")} placeholder="6–8 AM, 5–7 PM" />
+        </div>
+        <TextField label="Facilities" icon={Dumbbell} value={dv("facilities")} onChange={d("facilities")} placeholder="Cardio, weights, trainer, locker" />
+        <RepeatRows
+          label="Membership plans"
+          addLabel="Add plan"
+          rows={detail.plans && detail.plans.length ? detail.plans : [{ name: "", months: "", fee: "" }]}
+          onChange={(rows) => setDetail({ ...detail, plans: rows })}
+          cols={[
+            { key: "name", placeholder: "Plan name" },
+            { key: "months", placeholder: "Months", type: "number" },
+            { key: "fee", placeholder: "Fee ₹", type: "number" },
+          ]}
+        />
+      </div>
+    );
+  }
+
+  if (category === "Library") {
+    return (
+      <div className="flex flex-col gap-4 mt-4">
+        <TextField label="Total seats" icon={Users} value={dv("totalSeats")} onChange={d("totalSeats")} type="number" placeholder="60" />
+        <RepeatRows
+          label="Seat types & price"
+          addLabel="Add seat type"
+          rows={detail.seatTypes && detail.seatTypes.length ? detail.seatTypes : [{ type: "", price: "" }]}
+          onChange={(rows) => setDetail({ ...detail, seatTypes: rows })}
+          cols={[
+            { key: "type", placeholder: "AC / Non-AC / Cabin" },
+            { key: "price", placeholder: "Price ₹", type: "number" },
+          ]}
+        />
+        <RepeatRows
+          label="Shifts / slots"
+          addLabel="Add shift"
+          rows={detail.shifts && detail.shifts.length ? detail.shifts : [{ label: "", time: "", fee: "" }]}
+          onChange={(rows) => setDetail({ ...detail, shifts: rows })}
+          cols={[
+            { key: "label", placeholder: "Morning / Full-day" },
+            { key: "time", placeholder: "6 AM–12 PM" },
+            { key: "fee", placeholder: "Fee ₹", type: "number" },
+          ]}
+        />
+      </div>
+    );
+  }
+
+  return null;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -695,9 +959,12 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
           phone: resumeApplication.phone || "",
           email: resumeApplication.email || "",
           address: resumeApplication.address || "",
-          category: resumeApplication.category || "salon",
+          category: resumeApplication.category || "",
+          salonType: resumeApplication.salonType || "",
           hours: resumeApplication.hours || "9:00 AM – 9:00 PM (Mon–Sun)",
-          services: resumeApplication.services || "Hair Cut, Hair Color, Facial, Bridal Makeup",
+          services: resumeApplication.services || "",
+          detail: resumeApplication.detail || {},
+          selectedServices: [],
         }
       : {
           shopName: "",
@@ -705,11 +972,58 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
           phone: "",
           email: "",
           address: "",
-          category: "salon",
+          category: "",
+          salonType: "",
           hours: "9:00 AM – 9:00 PM (Mon–Sun)",
-          services: "Hair Cut, Hair Color, Facial, Bridal Makeup",
+          services: "",
+          detail: {},
+          selectedServices: [],
         }
   );
+
+  // Category list (from backend) + services for the picked category.
+  const [categories, setCategories] = useState([]);
+  const [serviceCatalog, setServiceCatalog] = useState([]);
+  const [servicesLoading, setServicesLoading] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        setCategories(await fetchCategories());
+      } catch {
+        setCategories([]);
+      }
+    })();
+  }, []);
+
+  // group of the currently selected category
+  const selectedCat = categories.find((c) => c.name === form.category);
+  const group = form.category ? catGroup(form.category, selectedCat?.kind) : null;
+  const needsServicePicker = group === "salon" || group === "service";
+
+  // load services whenever the category changes (only where a picker is shown)
+  useEffect(() => {
+    if (!form.category || !needsServicePicker) {
+      setServiceCatalog([]);
+      return;
+    }
+    let alive = true;
+    (async () => {
+      setServicesLoading(true);
+      try {
+        const list = await fetchCategoryServices(form.category);
+        if (alive) setServiceCatalog(list);
+      } catch {
+        if (alive) setServiceCatalog([]);
+      } finally {
+        if (alive) setServicesLoading(false);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.category]);
   const [front, setFront] = useState(resumeApplication?.photoFront || null);
   const [inside, setInside] = useState(resumeApplication?.photoInside || null);
   const [frontUrl, setFrontUrl] = useState(resumeApplication?.photoFront || null);
@@ -859,40 +1173,102 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
               title="Tell us about the business"
               sub="This information appears on the partner's public SlotB listing."
             />
-            <div className="flex gap-2 mb-6">
-              {[
-                { k: "salon", label: "Salon", Icon: Scissors },
-                { k: "medical", label: "Hospital / Medical", Icon: Stethoscope },
-              ].map((c) => (
-                <button
-                  key={c.k}
-                  onClick={() => set("category")(c.k)}
-                  className="flex-1 flex items-center justify-center gap-2 rounded-xl py-3 text-sm font-semibold sb-body"
-                  style={{
-                    background: form.category === c.k ? C.navy : C.sky,
-                    color: form.category === c.k ? C.white : C.slate,
-                  }}
-                >
-                  <c.Icon size={16} />
-                  {c.label}
-                </button>
-              ))}
-            </div>
+            {/* Category picker — dynamic from backend */}
+            <label className="text-xs font-semibold sb-body block mb-1.5" style={{ color: C.slate }}>
+              Business category
+            </label>
+            {categories.length === 0 ? (
+              <div className="flex items-center gap-2 text-xs sb-body py-3 mb-4" style={{ color: C.slateLight }}>
+                <Loader2 size={14} className="animate-spin" /> Loading categories…
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-5">
+                {categories.map((c) => {
+                  const Icon = catIcon(c.name);
+                  const on = form.category === c.name;
+                  return (
+                    <button
+                      key={c.name}
+                      onClick={() =>
+                        setForm((f) => ({ ...f, category: c.name, salonType: "", detail: {}, selectedServices: [] }))
+                      }
+                      className="flex items-center gap-2 rounded-xl px-3 py-3 text-sm font-semibold sb-body text-left"
+                      style={{
+                        background: on ? C.navy : C.sky,
+                        color: on ? C.white : C.slate,
+                        border: `1px solid ${on ? C.navy : C.line}`,
+                      }}
+                    >
+                      <Icon size={16} />
+                      <span className="truncate">{c.name}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Salon type — only for salon categories */}
+            {group === "salon" && (
+              <div className="mb-5">
+                <label className="text-xs font-semibold sb-body block mb-1.5" style={{ color: C.slate }}>
+                  Salon type
+                </label>
+                <div className="flex gap-2">
+                  {SALON_TYPES.map((t) => {
+                    const on = form.salonType === t.value;
+                    return (
+                      <button
+                        key={t.value}
+                        onClick={() => set("salonType")(t.value)}
+                        className="flex-1 rounded-xl py-2.5 text-sm font-semibold sb-body"
+                        style={{
+                          background: on ? C.navy : C.sky,
+                          color: on ? C.white : C.slate,
+                          border: `1px solid ${on ? C.navy : C.line}`,
+                        }}
+                      >
+                        {t.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
             <div className="grid sm:grid-cols-2 gap-4">
-              <TextField label="Shop name" icon={Store} value={form.shopName} onChange={set("shopName")} placeholder="Glow & Style Salon" />
+              <TextField label="Shop / business name" icon={Store} value={form.shopName} onChange={set("shopName")} placeholder="Glow & Style Salon" />
               <TextField label="Owner name" icon={User} value={form.owner} onChange={set("owner")} placeholder="Priya Sharma" />
               <TextField label="Mobile number" icon={Phone} value={form.phone} onChange={set("phone")} placeholder="98765 43210" />
               <TextField label="Email address" icon={Mail} value={form.email} onChange={set("email")} placeholder="owner@business.in" />
             </div>
             <div className="mt-4">
-              <TextField label="Shop address" icon={MapPin} value={form.address} onChange={set("address")} placeholder="Shop No. 12, Station Road, Begusarai" />
+              <TextField label="Address" icon={MapPin} value={form.address} onChange={set("address")} placeholder="Shop No. 12, Station Road, Begusarai" />
             </div>
-            <div className="grid sm:grid-cols-2 gap-4 mt-4">
+            <div className="mt-4">
               <TextField label="Business hours" icon={Clock} value={form.hours} onChange={set("hours")} />
-              <TextField label="Services offered" icon={ListChecks} value={form.services} onChange={set("services")} />
             </div>
+
+            {/* Category-specific section */}
+            {needsServicePicker && (
+              <div className="mt-5">
+                <ServicePicker
+                  catalog={serviceCatalog}
+                  loading={servicesLoading}
+                  selected={form.selectedServices}
+                  onChange={(list) => set("selectedServices")(list)}
+                />
+              </div>
+            )}
+            {group === "member" && (
+              <DetailFields
+                group={group}
+                category={form.category}
+                detail={form.detail}
+                setDetail={(d) => set("detail")(d)}
+              />
+            )}
             <div className="flex justify-end mt-8">
-              <PrimaryButton icon={ArrowRight} onClick={() => setStep(1)}>
+              <PrimaryButton icon={ArrowRight} onClick={() => setStep(1)} disabled={!form.category}>
                 Continue
               </PrimaryButton>
             </div>
@@ -952,13 +1328,43 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
                 </div>
               ))}
             </div>
+            <PreviewRow label="Category" value={form.category + (form.salonType ? ` (${form.salonType})` : "")} />
             <PreviewRow label="Shop name" value={form.shopName || "—"} />
             <PreviewRow label="Owner" value={form.owner || "—"} />
             <PreviewRow label="Mobile" value={form.phone || "—"} />
             <PreviewRow label="Email" value={form.email || "—"} />
             <PreviewRow label="Address" value={form.address || "—"} />
             <PreviewRow label="Hours" value={form.hours} />
-            <PreviewRow label="Services" value={form.services} last />
+            {form.selectedServices.length > 0 && (
+              <PreviewRow
+                label="Services"
+                value={form.selectedServices
+                  .map((s) => (s.price !== "" && s.price != null ? `${s.name} (₹${s.price})` : s.name))
+                  .join(", ")}
+              />
+            )}
+            {group === "member" &&
+              Object.entries(form.detail || {})
+                .filter(([, v]) => v && (!Array.isArray(v) || v.length))
+                .map(([k, v]) => (
+                  <PreviewRow
+                    key={k}
+                    label={k}
+                    value={
+                      Array.isArray(v)
+                        ? v
+                            .map((row) =>
+                              Object.values(row)
+                                .filter(Boolean)
+                                .join(" · ")
+                            )
+                            .filter(Boolean)
+                            .join("  |  ")
+                        : String(v)
+                    }
+                  />
+                ))}
+            <PreviewRow label="Verified by" value="On-ground onboarding partner" last />
             <div className="flex justify-between mt-8">
               <GhostButton icon={ChevronLeft} onClick={() => setStep(1)}>
                 Back
@@ -1204,9 +1610,12 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
                     phone: "",
                     email: "",
                     address: "",
-                    category: "salon",
+                    category: "",
+                    salonType: "",
                     hours: "9:00 AM – 9:00 PM (Mon–Sun)",
-                    services: "Hair Cut, Hair Color, Facial, Bridal Makeup",
+                    services: "",
+                    detail: {},
+                    selectedServices: [],
                   });
                   setFront(null);
                   setInside(null);
@@ -1299,12 +1708,20 @@ function PreviewRow({ label, value, last }) {
 /* Ops — Applications                                                      */
 /* ---------------------------------------------------------------------- */
 function ApplicationsArea({ applications, onOpenApplication }) {
-  const [tab, setTab] = useState("salon");
+  const [tab, setTab] = useState("all");
   const [query, setQuery] = useState("");
 
-  const filtered = applications.filter(
-    (a) => a.category === tab && a.name.toLowerCase().includes(query.toLowerCase())
-  );
+  // Build category tabs dynamically from whatever categories are present.
+  const catNames = Array.from(new Set(applications.map((a) => a.category).filter(Boolean))).sort();
+  const tabs = [{ k: "all", label: "All" }, ...catNames.map((c) => ({ k: c, label: c }))];
+
+  const filtered = applications.filter((a) => {
+    const matchCat = tab === "all" || a.category === tab;
+    const q = query.toLowerCase();
+    const matchQ =
+      (a.name || "").toLowerCase().includes(q) || (a.owner || "").toLowerCase().includes(q);
+    return matchCat && matchQ;
+  });
 
   const counts = {
     total: applications.length,
@@ -1322,24 +1739,25 @@ function ApplicationsArea({ applications, onOpenApplication }) {
         <StatCard label="Rejected" value={counts.rejected} tone="danger" />
       </div>
 
-      <div className="flex items-center gap-2 mb-5">
-        {[
-          { k: "salon", label: "Salon", Icon: Scissors, n: applications.filter((a) => a.category === "salon").length },
-          { k: "medical", label: "Hospital / Medical", Icon: Stethoscope, n: applications.filter((a) => a.category === "medical").length },
-        ].map((t) => (
-          <button
-            key={t.k}
-            onClick={() => setTab(t.k)}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold sb-body"
-            style={{
-              background: tab === t.k ? C.navy : C.white,
-              color: tab === t.k ? C.white : C.slate,
-              border: `1px solid ${tab === t.k ? C.navy : C.line}`,
-            }}
-          >
-            <t.Icon size={15} /> {t.label} ({t.n})
-          </button>
-        ))}
+      <div className="flex items-center gap-2 mb-5 flex-wrap">
+        {tabs.map((t) => {
+          const n = t.k === "all" ? applications.length : applications.filter((a) => a.category === t.k).length;
+          const on = tab === t.k;
+          return (
+            <button
+              key={t.k}
+              onClick={() => setTab(t.k)}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold sb-body"
+              style={{
+                background: on ? C.navy : C.white,
+                color: on ? C.white : C.slate,
+                border: `1px solid ${on ? C.navy : C.line}`,
+              }}
+            >
+              {t.label} ({n})
+            </button>
+          );
+        })}
       </div>
 
       <div className="flex items-center gap-3 mb-5">
@@ -1359,12 +1777,15 @@ function ApplicationsArea({ applications, onOpenApplication }) {
         {filtered.map((a) => (
           <div key={a.id} className="rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center gap-4" style={{ background: C.white, border: `1px solid ${C.line}` }}>
             <div className="w-12 h-12 rounded-xl flex items-center justify-center shrink-0" style={{ background: C.sky }}>
-              {a.category === "salon" ? <Scissors size={18} color={C.navy} /> : <Stethoscope size={18} color={C.navy} />}
+              {(() => {
+                const Icon = catIcon(a.category);
+                return <Icon size={18} color={C.navy} />;
+              })()}
             </div>
             <div className="flex-1 min-w-0">
               <div className="font-semibold sb-body text-sm" style={{ color: C.ink }}>{a.name}</div>
               <div className="text-xs sb-body mt-0.5" style={{ color: C.slateLight }}>
-                {a.owner} · {a.phone} · {a.city} · {a.date}
+                {a.category}{a.salonType ? ` (${a.salonType})` : ""} · {a.owner} · {a.phone} · {a.city} · {a.date}
               </div>
               {a.qr && (
                 <div className="text-xs sb-mono font-semibold mt-1" style={{ color: C.success }}>
