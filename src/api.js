@@ -91,6 +91,14 @@ export async function verifySession() {
 }
 
 function normalizeApplication(row) {
+  let detail = null;
+  if (row.detail_json) {
+    try {
+      detail = JSON.parse(row.detail_json);
+    } catch {
+      detail = null;
+    }
+  }
   return {
     id: row.id,
     name: row.shop_name,
@@ -98,16 +106,20 @@ function normalizeApplication(row) {
     phone: row.phone,
     email: row.email,
     category: row.category,
+    salonType: row.salon_type || null,
     city: row.city,
     address: row.address,
     hours: row.business_hours,
     services: row.services,
+    detail,
     photoFront: row.photo_front,
     photoInside: row.photo_inside,
     date: row.created_at ? row.created_at.split(" ")[0] : "",
     status: row.status,
     qr: row.qr_id,
     paymentStatus: row.payment_status,
+    assignedTo: row.assigned_to || null,
+    assignedName: row.assigned_name || null,
   };
 }
 
@@ -131,16 +143,25 @@ export async function fetchApplications() {
 }
 
 export async function createApplication(form, photoFrontUrl, photoInsideUrl, source = "ops_console") {
+  // free-text summary of selected services, for back-compat display
+  const servicesSummary =
+    Array.isArray(form.selectedServices) && form.selectedServices.length
+      ? form.selectedServices.map((s) => s.name).join(", ")
+      : form.services || "";
+
   const payload = {
     shop_name: form.shopName,
     owner_name: form.owner,
     phone: form.phone,
     email: form.email,
     category: form.category,
+    salon_type: form.salonType || null,
     city: form.city || "Begusarai",
     address: form.address,
     business_hours: form.hours,
-    services: form.services,
+    services: servicesSummary,
+    detail: form.detail || null,
+    services_list: Array.isArray(form.selectedServices) ? form.selectedServices : [],
     photo_front: photoFrontUrl || null,
     photo_inside: photoInsideUrl || null,
     source,
@@ -151,6 +172,41 @@ export async function createApplication(form, photoFrontUrl, photoInsideUrl, sou
     body: JSON.stringify(payload),
   });
   return handle(res); // { id, status }
+}
+
+/* ---------------------------- Categories ------------------------------ */
+
+// All active categories (name, kind salon|service, salon_type) for the picker.
+export async function fetchCategories() {
+  const res = await fetch(`${API_BASE}/api_services.php?action=get_categories`);
+  const data = await res.json().catch(() => ({}));
+  const list = data.categories || data.data || [];
+  return list.map((c) => ({
+    name: c.name,
+    kind: c.kind || "service",
+    salonType: c.salon_type || null,
+    image: c.image_url || c.image || null,
+  }));
+}
+
+// Services inside one category, flattened to [{ id, name, price, section }].
+export async function fetchCategoryServices(category) {
+  const res = await fetch(
+    `${API_BASE}/api_category_services.php?action=list&category=${encodeURIComponent(category)}`
+  );
+  const data = await res.json().catch(() => ({}));
+  const out = [];
+  (data.sections || []).forEach((sec) => {
+    (sec.items || []).forEach((it) => {
+      out.push({
+        id: it.id,
+        name: it.name,
+        price: it.price ?? null,
+        section: sec.heading || "Services",
+      });
+    });
+  });
+  return out;
 }
 
 export async function setApplicationStatus(id, action) {
