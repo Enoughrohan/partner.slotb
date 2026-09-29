@@ -176,17 +176,41 @@ export async function createApplication(form, photoFrontUrl, photoInsideUrl, sou
 
 /* ---------------------------- Categories ------------------------------ */
 
-// All active categories (name, kind salon|service, salon_type) for the picker.
+// All active categories for the picker. Uses the SAME endpoint the customer
+// site uses, and is tolerant of whatever shape it returns (array at top,
+// { categories: [...] }, { data: [...] }, or a grouped object).
 export async function fetchCategories() {
   const res = await fetch(`${API_BASE}/api_services.php?action=get_categories`);
   const data = await res.json().catch(() => ({}));
-  const list = data.categories || data.data || [];
-  return list.map((c) => ({
-    name: c.name,
-    kind: c.kind || "service",
-    salonType: c.salon_type || null,
-    image: c.image_url || c.image || null,
-  }));
+
+  let list = [];
+  if (Array.isArray(data)) {
+    list = data;
+  } else if (Array.isArray(data.categories)) {
+    list = data.categories;
+  } else if (Array.isArray(data.data)) {
+    list = data.data;
+  } else if (data.categories && typeof data.categories === "object") {
+    // grouped like { categories: { salon: [...], service: [...] } }
+    list = Object.values(data.categories).flat();
+  } else {
+    // last resort: gather any array-of-objects in the response
+    Object.values(data || {}).forEach((v) => {
+      if (Array.isArray(v)) list = list.concat(v);
+    });
+  }
+
+  return list
+    .filter((c) => c && (c.name || c.category_name || c.title))
+    .map((c) => {
+      const salonType = c.salon_type || c.salonType || null;
+      return {
+        name: c.name || c.category_name || c.title,
+        kind: c.kind || (salonType ? "salon" : "service"),
+        salonType,
+        image: c.image_url || c.image || null,
+      };
+    });
 }
 
 // Services inside one category, flattened to [{ id, name, price, section }].
