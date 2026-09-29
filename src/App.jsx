@@ -985,6 +985,7 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
 
   // Category list (from backend) + services for the picked category.
   const [categories, setCategories] = useState([]);
+  const [catsLoaded, setCatsLoaded] = useState(false);
   const [serviceCatalog, setServiceCatalog] = useState([]);
   const [servicesLoading, setServicesLoading] = useState(false);
 
@@ -1044,6 +1045,8 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
         setCategories(await fetchCategories());
       } catch {
         setCategories([]);
+      } finally {
+        setCatsLoaded(true);
       }
     })();
   }, []);
@@ -1227,23 +1230,30 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
             />
             {/* Category picker — dropdown, dynamic from backend */}
             <div className="mb-5">
-              {categories.length === 0 ? (
+              {!catsLoaded ? (
                 <FieldShell label="Business category" icon={LayoutGrid}>
                   <span className="text-sm sb-body flex items-center gap-2" style={{ color: C.slateLight }}>
                     <Loader2 size={14} className="animate-spin" /> Loading…
                   </span>
                 </FieldShell>
               ) : (
-                <SelectField
-                  label="Business category"
-                  icon={LayoutGrid}
-                  value={form.category}
-                  onChange={(name) =>
-                    setForm((f) => ({ ...f, category: name, salonType: "", detail: {}, selectedServices: [] }))
-                  }
-                  placeholder="Kaunsa business onboard kar rahe hain?"
-                  options={categories.map((c) => ({ value: c.name, label: c.name }))}
-                />
+                <>
+                  <SelectField
+                    label="Business category"
+                    icon={LayoutGrid}
+                    value={form.category}
+                    onChange={(name) =>
+                      setForm((f) => ({ ...f, category: name, salonType: "", detail: {}, selectedServices: [] }))
+                    }
+                    placeholder="Kaunsa business onboard kar rahe hain?"
+                    options={categories.map((c) => ({ value: c.name, label: c.name }))}
+                  />
+                  {categories.length === 0 && (
+                    <div className="text-xs sb-body mt-1.5" style={{ color: C.danger }}>
+                      Categories load nahi ho paayin. Page refresh karein — na aaye to backend check karein.
+                    </div>
+                  )}
+                </>
               )}
             </div>
 
