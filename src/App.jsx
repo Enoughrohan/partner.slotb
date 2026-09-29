@@ -57,6 +57,8 @@ import {
   uploadShopPhoto,
   fetchCategories,
   fetchCategoryServices,
+  sendOnboardingOtp,
+  verifyOnboardingOtp,
   login,
   logout,
   verifySession,
@@ -986,6 +988,56 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
   const [serviceCatalog, setServiceCatalog] = useState([]);
   const [servicesLoading, setServicesLoading] = useState(false);
 
+  // Email OTP verification
+  const [otpSent, setOtpSent] = useState(false);
+  const [otpCode, setOtpCode] = useState("");
+  const [emailVerified, setEmailVerified] = useState(false);
+  const [otpBusy, setOtpBusy] = useState(false);
+  const [otpMsg, setOtpMsg] = useState("");
+
+  const changeEmail = (v) => {
+    setForm((f) => ({ ...f, email: v }));
+    // email badla to verification reset
+    setEmailVerified(false);
+    setOtpSent(false);
+    setOtpCode("");
+    setOtpMsg("");
+  };
+
+  const handleSendOtp = async () => {
+    const email = (form.email || "").trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setOtpMsg("Pehle sahi email daaliye");
+      return;
+    }
+    setOtpBusy(true);
+    setOtpMsg("");
+    try {
+      await sendOnboardingOtp(email);
+      setOtpSent(true);
+      setOtpMsg("OTP bhej diya gaya — email check kijiye");
+    } catch (e) {
+      setOtpMsg(e.message || "OTP bhejne me dikkat");
+    } finally {
+      setOtpBusy(false);
+    }
+  };
+
+  const handleVerifyOtp = async () => {
+    if (!otpCode.trim()) return;
+    setOtpBusy(true);
+    setOtpMsg("");
+    try {
+      await verifyOnboardingOtp((form.email || "").trim(), otpCode.trim());
+      setEmailVerified(true);
+      setOtpMsg("");
+    } catch (e) {
+      setOtpMsg(e.message || "Galat ya expired OTP");
+    } finally {
+      setOtpBusy(false);
+    }
+  };
+
   useEffect(() => {
     (async () => {
       try {
@@ -1173,39 +1225,27 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
               title="Tell us about the business"
               sub="This information appears on the partner's public SlotB listing."
             />
-            {/* Category picker — dynamic from backend */}
-            <label className="text-xs font-semibold sb-body block mb-1.5" style={{ color: C.slate }}>
-              Business category
-            </label>
-            {categories.length === 0 ? (
-              <div className="flex items-center gap-2 text-xs sb-body py-3 mb-4" style={{ color: C.slateLight }}>
-                <Loader2 size={14} className="animate-spin" /> Loading categories…
-              </div>
-            ) : (
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-5">
-                {categories.map((c) => {
-                  const Icon = catIcon(c.name);
-                  const on = form.category === c.name;
-                  return (
-                    <button
-                      key={c.name}
-                      onClick={() =>
-                        setForm((f) => ({ ...f, category: c.name, salonType: "", detail: {}, selectedServices: [] }))
-                      }
-                      className="flex items-center gap-2 rounded-xl px-3 py-3 text-sm font-semibold sb-body text-left"
-                      style={{
-                        background: on ? C.navy : C.sky,
-                        color: on ? C.white : C.slate,
-                        border: `1px solid ${on ? C.navy : C.line}`,
-                      }}
-                    >
-                      <Icon size={16} />
-                      <span className="truncate">{c.name}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
+            {/* Category picker — dropdown, dynamic from backend */}
+            <div className="mb-5">
+              {categories.length === 0 ? (
+                <FieldShell label="Business category" icon={LayoutGrid}>
+                  <span className="text-sm sb-body flex items-center gap-2" style={{ color: C.slateLight }}>
+                    <Loader2 size={14} className="animate-spin" /> Loading…
+                  </span>
+                </FieldShell>
+              ) : (
+                <SelectField
+                  label="Business category"
+                  icon={LayoutGrid}
+                  value={form.category}
+                  onChange={(name) =>
+                    setForm((f) => ({ ...f, category: name, salonType: "", detail: {}, selectedServices: [] }))
+                  }
+                  placeholder="Kaunsa business onboard kar rahe hain?"
+                  options={categories.map((c) => ({ value: c.name, label: c.name }))}
+                />
+              )}
+            </div>
 
             {/* Salon type — only for salon categories */}
             {group === "salon" && (
@@ -1239,8 +1279,81 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
               <TextField label="Shop / business name" icon={Store} value={form.shopName} onChange={set("shopName")} placeholder="Glow & Style Salon" />
               <TextField label="Owner name" icon={User} value={form.owner} onChange={set("owner")} placeholder="Priya Sharma" />
               <TextField label="Mobile number" icon={Phone} value={form.phone} onChange={set("phone")} placeholder="98765 43210" />
-              <TextField label="Email address" icon={Mail} value={form.email} onChange={set("email")} placeholder="owner@business.in" />
             </div>
+
+            {/* Email + OTP verification */}
+            <div className="mt-4">
+              <label className="text-xs font-semibold sb-body block mb-1.5" style={{ color: C.slate }}>
+                Email address {emailVerified && <span style={{ color: C.success }}>· verified</span>}
+              </label>
+              <div className="flex gap-2">
+                <div
+                  className="flex-1 flex items-center gap-2.5 rounded-xl px-3.5 py-3"
+                  style={{ background: C.sky, border: `1px solid ${emailVerified ? C.success : C.line}` }}
+                >
+                  <Mail size={16} color={emailVerified ? C.success : C.slateLight} />
+                  <input
+                    type="email"
+                    value={form.email}
+                    onChange={(e) => changeEmail(e.target.value)}
+                    placeholder="owner@business.in"
+                    disabled={emailVerified}
+                    className="w-full bg-transparent outline-none text-sm sb-body"
+                    style={{ color: C.ink }}
+                  />
+                  {emailVerified && <CheckCircle2 size={17} color={C.success} />}
+                </div>
+                {!emailVerified && (
+                  <button
+                    onClick={handleSendOtp}
+                    disabled={otpBusy}
+                    className="px-4 rounded-xl text-sm font-semibold sb-body shrink-0"
+                    style={{ background: C.navy, color: C.white, opacity: otpBusy ? 0.6 : 1 }}
+                  >
+                    {otpBusy ? "..." : otpSent ? "Resend" : "Send OTP"}
+                  </button>
+                )}
+              </div>
+
+              {otpSent && !emailVerified && (
+                <div className="flex gap-2 mt-2">
+                  <div
+                    className="flex-1 flex items-center gap-2.5 rounded-xl px-3.5 py-3"
+                    style={{ background: C.white, border: `1px solid ${C.line}` }}
+                  >
+                    <Lock size={15} color={C.slateLight} />
+                    <input
+                      value={otpCode}
+                      onChange={(e) => setOtpCode(e.target.value)}
+                      placeholder="6-digit OTP"
+                      inputMode="numeric"
+                      maxLength={6}
+                      className="w-full bg-transparent outline-none text-sm sb-mono font-semibold tracking-widest"
+                      style={{ color: C.ink }}
+                    />
+                  </div>
+                  <button
+                    onClick={handleVerifyOtp}
+                    disabled={otpBusy || otpCode.trim().length < 4}
+                    className="px-4 rounded-xl text-sm font-semibold sb-body shrink-0"
+                    style={{
+                      background: C.success,
+                      color: C.white,
+                      opacity: otpBusy || otpCode.trim().length < 4 ? 0.5 : 1,
+                    }}
+                  >
+                    Verify
+                  </button>
+                </div>
+              )}
+
+              {otpMsg && (
+                <div className="text-xs sb-body mt-2" style={{ color: emailVerified ? C.success : C.slate }}>
+                  {otpMsg}
+                </div>
+              )}
+            </div>
+
             <div className="mt-4">
               <TextField label="Address" icon={MapPin} value={form.address} onChange={set("address")} placeholder="Shop No. 12, Station Road, Begusarai" />
             </div>
@@ -1267,8 +1380,18 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
                 setDetail={(d) => set("detail")(d)}
               />
             )}
+            {!emailVerified && (
+              <div className="mt-5 rounded-xl px-4 py-3 flex items-start gap-2.5 text-xs sb-body" style={{ background: C.amberSoft, color: C.amber }}>
+                <AlertTriangle size={15} className="mt-0.5 shrink-0" />
+                Continue karne ke liye email OTP se verify karna zaroori hai.
+              </div>
+            )}
             <div className="flex justify-end mt-8">
-              <PrimaryButton icon={ArrowRight} onClick={() => setStep(1)} disabled={!form.category}>
+              <PrimaryButton
+                icon={ArrowRight}
+                onClick={() => setStep(1)}
+                disabled={!form.category || !form.shopName.trim() || !form.owner.trim() || !form.phone.trim() || !emailVerified}
+              >
                 Continue
               </PrimaryButton>
             </div>
@@ -1627,6 +1750,10 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
                   setQrLookup(null);
                   setAssignedQr(null);
                   setErrorMsg("");
+                  setEmailVerified(false);
+                  setOtpSent(false);
+                  setOtpCode("");
+                  setOtpMsg("");
                   setStep(0);
                 }}
               >
