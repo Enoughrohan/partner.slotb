@@ -180,7 +180,8 @@ export async function createApplication(form, photoFrontUrl, photoInsideUrl, sou
 // site uses, and is tolerant of whatever shape it returns (array at top,
 // { categories: [...] }, { data: [...] }, or a grouped object).
 export async function fetchCategories() {
-  const res = await fetch(`${API_BASE}/api_services.php?action=get_categories`);
+  // Pulled from our own endpoint (guaranteed shape + open CORS).
+  const res = await fetch(`${API_BASE}/api_category_services.php?action=categories`);
   const data = await res.json().catch(() => ({}));
 
   let list = [];
