@@ -46,6 +46,7 @@ import {
   Image as ImageIcon,
 } from "lucide-react";
 import jsQR from "jsqr";
+import ShopLocationPicker from "./ShopLocation";
 import {
   fetchApplications,
   fetchQrBank,
@@ -59,6 +60,7 @@ import {
   fetchCategoryServices,
   sendOnboardingOtp,
   verifyOnboardingOtp,
+  updateApplicationLocation,
   login,
   logout,
   verifySession,
@@ -642,7 +644,7 @@ function TopBar({ title, sub }) {
 /* ---------------------------------------------------------------------- */
 /* Onboarding wizard                                                      */
 /* ---------------------------------------------------------------------- */
-const STEPS = ["Basic Details", "Shop Photos", "Preview", "Activate QR", "Payment", "Done"];
+const STEPS = ["Basic Details", "Photos & Location", "Preview", "Activate QR", "Payment", "Done"];
 
 function StepRail({ step }) {
   return (
@@ -967,6 +969,15 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
           services: resumeApplication.services || "",
           detail: resumeApplication.detail || {},
           selectedServices: [],
+          location:
+            resumeApplication.latitude != null && resumeApplication.longitude != null
+              ? {
+                  lat: Number(resumeApplication.latitude),
+                  lng: Number(resumeApplication.longitude),
+                  accuracy: resumeApplication.locationAccuracy ?? null,
+                  source: "saved",
+                }
+              : null,
         }
       : {
           shopName: "",
@@ -980,6 +991,7 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
           services: "",
           detail: {},
           selectedServices: [],
+          location: null,
         }
   );
 
@@ -1099,6 +1111,7 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
   const [cameraFor, setCameraFor] = useState(null); // "front" | "inside" | null
 
   const set = (k) => (v) => setForm((f) => ({ ...f, [k]: v }));
+  const setLocation = React.useCallback((loc) => setForm((f) => ({ ...f, location: loc })), []);
 
   const handlePickFront = async (previewUrl, file) => {
     setFront(previewUrl);
@@ -1155,6 +1168,9 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
         const created = await createApplication(form, frontUrl, insideUrl, "ops_console");
         appId = created.id;
         setServerAppId(appId);
+      } else if (form.location) {
+        // Partner app se aayi (ya pehle bani) application — ground pe li gayi location save karo.
+        await updateApplicationLocation(appId, form.location);
       }
       await assignQrToApplication(appId, target.id, form.shopName || "New Partner");
       setAssignedQr(target.id);
@@ -1413,8 +1429,8 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
           <Card>
             <SectionHeading
               eyebrow="Step 2 of 5"
-              title="Add shop photos"
-              sub="Clear, real photos of the shop front and interior for verification."
+              title="Shop photos & location"
+              sub="Clear, real photos of the shop, and its exact location so customers can find it."
             />
             <div className="grid sm:grid-cols-2 gap-4">
               <PhotoUpload label="Shop front photo" sub={uploadingFront ? "Uploading..." : "Tap to upload"} image={front} onPick={handlePickFront} onOpenCamera={() => setCameraFor("front")} />
@@ -1433,11 +1449,25 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
               <ImageIcon size={15} className="mt-0.5 shrink-0" color={C.slateLight} />
               Use well-lit, original photos that show the shop name board where possible. Max 5 MB, JPG or PNG.
             </div>
+            <div className="mt-6">
+              <ShopLocationPicker
+                value={form.location}
+                onChange={setLocation}
+                onAddress={set("address")}
+                autoFillAddress={!form.address.trim()}
+              />
+            </div>
+            {!form.location && (
+              <div className="mt-4 rounded-xl px-4 py-3 flex items-start gap-2.5 text-xs sb-body" style={{ background: C.amberSoft, color: C.amber }}>
+                <AlertTriangle size={15} className="mt-0.5 shrink-0" />
+                Continue karne ke liye dukaan ki location lagana zaroori hai.
+              </div>
+            )}
             <div className="flex justify-between mt-8">
               <GhostButton icon={ChevronLeft} onClick={() => setStep(0)}>
                 Back
               </GhostButton>
-              <PrimaryButton icon={ArrowRight} onClick={() => setStep(2)} disabled={uploadingFront || uploadingInside}>
+              <PrimaryButton icon={ArrowRight} onClick={() => setStep(2)} disabled={uploadingFront || uploadingInside || !form.location}>
                 {uploadingFront || uploadingInside ? "Uploading photos..." : "Continue"}
               </PrimaryButton>
             </div>
@@ -1467,6 +1497,24 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
             <PreviewRow label="Mobile" value={form.phone || "—"} />
             <PreviewRow label="Email" value={form.email || "—"} />
             <PreviewRow label="Address" value={form.address || "—"} />
+            <PreviewRow
+              label="Location"
+              value={
+                form.location ? (
+                  <a
+                    href={`https://www.google.com/maps?q=${form.location.lat},${form.location.lng}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{ color: C.navy, textDecoration: "underline" }}
+                  >
+                    {form.location.lat.toFixed(5)}, {form.location.lng.toFixed(5)}
+                    {form.location.accuracy != null ? ` (±${form.location.accuracy} m)` : " (pin)"}
+                  </a>
+                ) : (
+                  "—"
+                )
+              }
+            />
             <PreviewRow label="Hours" value={form.hours} />
             {form.selectedServices.length > 0 && (
               <PreviewRow
@@ -1591,7 +1639,7 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
                       {form.shopName || "New Partner"}
                     </div>
                     <button
-                      onClick={handleAssign}
+                      onClick={() => handleAssign()}
                       disabled={assigning}
                       className="text-xs font-bold sb-body px-3 py-1.5 rounded-md"
                       style={{ background: C.success, color: C.white, opacity: assigning ? 0.6 : 1 }}
@@ -1749,6 +1797,7 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
                     services: "",
                     detail: {},
                     selectedServices: [],
+                    location: null,
                   });
                   setFront(null);
                   setInside(null);
