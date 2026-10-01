@@ -120,6 +120,9 @@ function normalizeApplication(row) {
     paymentStatus: row.payment_status,
     assignedTo: row.assigned_to || null,
     assignedName: row.assigned_name || null,
+    latitude: row.latitude != null ? Number(row.latitude) : null,
+    longitude: row.longitude != null ? Number(row.longitude) : null,
+    locationAccuracy: row.location_accuracy != null ? Number(row.location_accuracy) : null,
   };
 }
 
@@ -165,6 +168,9 @@ export async function createApplication(form, photoFrontUrl, photoInsideUrl, sou
     photo_front: photoFrontUrl || null,
     photo_inside: photoInsideUrl || null,
     source,
+    latitude: form.location ? form.location.lat : null,
+    longitude: form.location ? form.location.lng : null,
+    location_accuracy: form.location ? form.location.accuracy : null,
   };
   const res = await fetch(`${API_BASE}/api_partner_applications.php`, {
     method: "POST",
@@ -239,6 +245,22 @@ export async function setApplicationStatus(id, action) {
     method: "PUT",
     headers: authHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ id, action }),
+  });
+  return handle(res);
+}
+
+// Dukaan ki GPS location save (partner app se aayi application ke liye bhi)
+export async function updateApplicationLocation(id, loc) {
+  const res = await fetch(`${API_BASE}/api_partner_applications.php`, {
+    method: "PUT",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({
+      id,
+      action: "update_location",
+      latitude: loc.lat,
+      longitude: loc.lng,
+      accuracy: loc.accuracy,
+    }),
   });
   return handle(res);
 }
