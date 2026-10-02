@@ -44,6 +44,10 @@ import {
   IndianRupee,
   Check,
   Image as ImageIcon,
+  History,
+  BadgeCheck,
+  Receipt,
+  CircleUser,
 } from "lucide-react";
 import jsQR from "jsqr";
 import ShopLocationPicker from "./ShopLocation";
@@ -66,6 +70,12 @@ import {
   verifySession,
   getStoredUsername,
   AuthError,
+  fetchMe,
+  fetchMyQr,
+  claimQr,
+  fetchMyPayments,
+  fetchApplicationHistory,
+  fetchOnboardingFee,
 } from "./api";
 
 /* ---------------------------------------------------------------------- */
@@ -510,10 +520,12 @@ function DetailFields({ group, category, detail, setDetail }) {
 function Sidebar({ area, setArea, username, onLogout }) {
   const partnerNav = [
     { key: "onboard", label: "New Onboarding", Icon: PlusCircle },
+    { key: "profile", label: "Meri Profile", Icon: CircleUser },
   ];
   const opsNav = [
     { key: "applications", label: "Applications", Icon: ListChecks },
-    { key: "qrbank", label: "QR Bank", Icon: QrCode },
+    { key: "myqr", label: "Mere QR", Icon: QrCode },
+    { key: "payments", label: "Payment collected", Icon: Wallet },
   ];
   return (
     <aside
@@ -547,7 +559,7 @@ function Sidebar({ area, setArea, username, onLogout }) {
       </nav>
 
       <div className="mb-2 px-1 text-[11px] font-semibold tracking-wide sb-body" style={{ color: "#5C6693" }}>
-        Ops Console
+        Mera kaam
       </div>
       <nav className="flex flex-col gap-1">
         {opsNav.map((n) => (
@@ -601,10 +613,12 @@ function SideItem({ n, active, onClick }) {
 /* ---------------------------------------------------------------------- */
 /* Top bar                                                                 */
 /* ---------------------------------------------------------------------- */
-function TopBar({ title, sub }) {
+function TopBar({ title, sub, profile, onProfile }) {
+  const name = profile?.full_name || profile?.username || "";
+  const initials = name.split(" ").map((x) => x[0]).filter(Boolean).slice(0, 2).join("").toUpperCase() || "SB";
   return (
-    <div className="flex items-center justify-between mb-7">
-      <div>
+    <div className="flex items-center justify-between gap-4 mb-7">
+      <div className="min-w-0">
         <h1 className="sb-display font-bold text-2xl" style={{ color: C.ink }}>
           {title}
         </h1>
@@ -614,29 +628,18 @@ function TopBar({ title, sub }) {
           </p>
         )}
       </div>
-      <div className="flex items-center gap-3">
-        <button
-          className="w-10 h-10 rounded-full flex items-center justify-center relative"
-          style={{ background: C.white, border: `1px solid ${C.line}` }}
+      <button onClick={onProfile} className="flex items-center gap-2 pl-1 shrink-0" title="Meri profile">
+        <div
+          className="w-9 h-9 rounded-full flex items-center justify-center font-semibold text-sm sb-body"
+          style={{ background: C.orangeSoft, color: C.orangeDeep }}
         >
-          <Bell size={17} color={C.slate} />
-          <span
-            className="absolute top-2 right-2 w-1.5 h-1.5 rounded-full"
-            style={{ background: C.orange }}
-          />
-        </button>
-        <div className="flex items-center gap-2 pl-1">
-          <div
-            className="w-9 h-9 rounded-full flex items-center justify-center font-semibold text-sm sb-body"
-            style={{ background: C.orangeSoft, color: C.orangeDeep }}
-          >
-            RK
-          </div>
-          <div className="hidden sm:block text-sm font-semibold sb-body" style={{ color: C.ink }}>
-            Rohan
-          </div>
+          {initials}
         </div>
-      </div>
+        <div className="hidden sm:block text-sm font-semibold sb-body text-left" style={{ color: C.ink }}>
+          {name}
+          {profile?.username && <div className="text-[11px] font-normal" style={{ color: C.slateLight }}>@{profile.username}</div>}
+        </div>
+      </button>
     </div>
   );
 }
@@ -954,7 +957,13 @@ function extractQrId(raw) {
 }
 
 function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplication, onExitResume }) {
-  const [step, setStep] = useState(resumeApplication ? 1 : 0);
+  // QR pehle lag chuka ho (payment baaki) to seedha payment step
+  const [step, setStep] = useState(resumeApplication ? (resumeApplication.qr ? 4 : 1) : 0);
+  const [fee, setFee] = useState(499);
+  useEffect(() => { fetchOnboardingFee().then(setFee); }, []);
+  // onboarding partner ki ID par jo QR hain (sirf wahi laga sakta hai)
+  const [myQr, setMyQr] = useState([]);
+  const [myQrLoading, setMyQrLoading] = useState(false);
   const [form, setForm] = useState(
     resumeApplication
       ? {
@@ -1103,7 +1112,7 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
   const [looking, setLooking] = useState(false);
   const [assigning, setAssigning] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [assignedQr, setAssignedQr] = useState(null);
+  const [assignedQr, setAssignedQr] = useState(resumeApplication?.qr || null);
   const [method, setMethod] = useState("upi");
   const [errorMsg, setErrorMsg] = useState("");
   const [txnId] = useState(() => "SBP" + Math.floor(60000000 + Math.random() * 9000000));
@@ -1204,12 +1213,27 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
 
   const [paymentResult, setPaymentResult] = useState(null);
 
+  const loadMyQr = React.useCallback(async () => {
+    setMyQrLoading(true);
+    try {
+      const d = await fetchMyQr();
+      setMyQr((d.qr_codes || []).filter((q) => q.status === "available"));
+    } catch {
+      setMyQr([]);
+    } finally {
+      setMyQrLoading(false);
+    }
+  }, []);
+  useEffect(() => {
+    if (step === 3) loadMyQr();
+  }, [step, loadMyQr]);
+
   const handleSubmitApplication = async () => {
     setSubmitting(true);
     setErrorMsg("");
     try {
       const appId = serverAppId;
-      const result = await markApplicationPaid(appId, txnId, 499, method);
+      const result = await markApplicationPaid(appId, txnId, fee, method);
       setPaymentResult(result);
       onApplicationsChanged();
       setStep(5);
@@ -1566,6 +1590,36 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
               sub="Every printed QR card carries a unique ID. Enter or scan it to link this exact code to this shop — permanently."
             />
 
+            <div className="rounded-xl p-4 mb-4" style={{ background: C.sky, border: `1px solid ${C.line}` }}>
+              <div className="flex items-center justify-between mb-2.5">
+                <div className="text-xs font-bold sb-body" style={{ color: C.ink }}>Aapki ID wale QR ({myQr.length})</div>
+                {myQrLoading && <Loader2 size={14} className="animate-spin" color={C.slateLight} />}
+              </div>
+              {myQr.length === 0 && !myQrLoading ? (
+                <div className="text-xs sb-body" style={{ color: C.slate }}>
+                  Aapki ID par koi QR nahi hai. Pehle "Mere QR" me jaakar apne paas wale QR scan karke ID par chadhaiye.
+                </div>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {myQr.map((q) => (
+                    <button
+                      key={q.id}
+                      disabled={assigning}
+                      onClick={() => { setQrInput(q.id); setQrLookup({ id: q.id, status: "available", shop: null }); }}
+                      className="px-3 py-2 rounded-lg text-xs font-semibold sb-mono"
+                      style={{
+                        background: qrInput === q.id ? C.navy : C.white,
+                        color: qrInput === q.id ? C.white : C.ink,
+                        border: `1px solid ${qrInput === q.id ? C.navy : C.line}`,
+                      }}
+                    >
+                      {q.id}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
             <button
               onClick={() => setScannerOpen(true)}
               className="w-full flex items-center justify-center gap-2 text-sm font-bold sb-body py-3.5 rounded-xl mb-4"
@@ -1655,8 +1709,8 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
               <GhostButton icon={ChevronLeft} onClick={() => setStep(2)}>
                 Back
               </GhostButton>
-              <div className="text-xs sb-body self-center" style={{ color: C.slateLight }}>
-                Try <span className="sb-mono font-semibold" style={{ color: C.slate }}>QR-SB-000001</span> for a demo
+              <div className="text-xs sb-body self-center text-right" style={{ color: C.slateLight }}>
+                Sirf aapki ID wala QR lagega
               </div>
             </div>
           </Card>
@@ -1687,7 +1741,7 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
                 </div>
               </div>
               <div className="text-2xl font-bold sb-display" style={{ color: C.navy }}>
-                ₹499
+                ₹{fee}
               </div>
             </div>
 
@@ -1732,7 +1786,7 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
             )}
 
             <PrimaryButton full icon={ArrowRight} onClick={handleSubmitApplication} disabled={submitting}>
-              {submitting ? "Confirming payment..." : "Pay ₹499 and activate"}
+              {submitting ? "Confirming payment..." : `Pay ₹${fee} and activate`}
             </PrimaryButton>
             <div className="text-center text-xs sb-body mt-3 flex items-center justify-center gap-1.5" style={{ color: C.slateLight }}>
               <ShieldCheck size={13} /> 100% secure payment
@@ -1758,7 +1812,7 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
                 <Row k="Shop" v={form.shopName || "—"} />
                 <Row k="QR ID" v={assignedQr} mono />
                 <Row k="Transaction ID" v={"#" + txnId} mono />
-                <Row k="Amount paid" v="₹499" last={!paymentResult?.partner_id} />
+                <Row k="Amount paid" v={`₹${fee}`} last={!paymentResult?.partner_id} />
                 {paymentResult?.partner_id && <Row k="Partner login ID" v={paymentResult.partner_id} mono last />}
               </div>
 
@@ -1896,6 +1950,7 @@ function PreviewRow({ label, value, last }) {
 function ApplicationsArea({ applications, onOpenApplication }) {
   const [tab, setTab] = useState("all");
   const [query, setQuery] = useState("");
+  const [historyFor, setHistoryFor] = useState(null);
 
   // Build category tabs dynamically from whatever categories are present.
   const catNames = Array.from(new Set(applications.map((a) => a.category).filter(Boolean))).sort();
@@ -1911,8 +1966,8 @@ function ApplicationsArea({ applications, onOpenApplication }) {
 
   const counts = {
     total: applications.length,
-    pending: applications.filter((a) => a.status === "pending").length,
-    approved: applications.filter((a) => a.status === "approved").length,
+    pending: applications.filter((a) => !a.isComplete && a.status !== "rejected").length,
+    approved: applications.filter((a) => a.isComplete).length,
     rejected: applications.filter((a) => a.status === "rejected").length,
   };
 
@@ -1920,8 +1975,8 @@ function ApplicationsArea({ applications, onOpenApplication }) {
     <div>
       <div className="flex flex-wrap gap-3 mb-7">
         <StatCard label="Total applications" value={counts.total} tone="navy" />
-        <StatCard label="Pending review" value={counts.pending} tone="amber" />
-        <StatCard label="Approved" value={counts.approved} tone="success" />
+        <StatCard label="Kaam baaki" value={counts.pending} tone="amber" />
+        <StatCard label="Complete" value={counts.approved} tone="success" />
         <StatCard label="Rejected" value={counts.rejected} tone="danger" />
       </div>
 
@@ -1980,15 +2035,32 @@ function ApplicationsArea({ applications, onOpenApplication }) {
               )}
             </div>
             <div className="flex items-center gap-3 shrink-0">
-              <StatusPill status={a.status} />
-              <button
-                onClick={() => onOpenApplication(a)}
-                className="text-xs font-bold sb-body px-4 py-2.5 rounded-lg flex items-center gap-1.5"
-                style={{ background: C.navy, color: C.white }}
-              >
-                Open Application
-                <ChevronRight size={13} />
-              </button>
+              {a.isComplete ? (
+                <span className="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold sb-body" style={{ background: C.successSoft, color: C.success }}>
+                  <Lock size={12} strokeWidth={2.5} /> Complete
+                </span>
+              ) : (
+                <StatusPill status={a.status} />
+              )}
+              {a.isComplete || a.status === "rejected" ? (
+                <button
+                  onClick={() => (a.isComplete ? setHistoryFor(a) : null)}
+                  disabled={!a.isComplete}
+                  className="text-xs font-bold sb-body px-4 py-2.5 rounded-lg flex items-center gap-1.5"
+                  style={{ background: C.white, color: C.navy, border: `1px solid ${C.line}`, opacity: a.isComplete ? 1 : 0.5 }}
+                >
+                  <History size={13} /> History
+                </button>
+              ) : (
+                <button
+                  onClick={() => onOpenApplication(a)}
+                  className="text-xs font-bold sb-body px-4 py-2.5 rounded-lg flex items-center gap-1.5"
+                  style={{ background: C.navy, color: C.white }}
+                >
+                  {a.qr ? "Payment baaki" : "Kaam shuru karein"}
+                  <ChevronRight size={13} />
+                </button>
+              )}
             </div>
           </div>
         ))}
@@ -1998,6 +2070,7 @@ function ApplicationsArea({ applications, onOpenApplication }) {
           </div>
         )}
       </div>
+      {historyFor && <HistoryModal app={historyFor} onClose={() => setHistoryFor(null)} />}
     </div>
   );
 }
@@ -2155,6 +2228,356 @@ function QrBankArea({ qrBank, applications, onDataChanged }) {
 }
 
 /* ---------------------------------------------------------------------- */
+/* Helpers (profile / QR / payments)                                       */
+/* ---------------------------------------------------------------------- */
+const inr = (v) => "₹" + Number(v || 0).toLocaleString("en-IN", { maximumFractionDigits: 0 });
+function fmtWhen(v) {
+  if (!v) return "";
+  const d = new Date(String(v).replace(" ", "T"));
+  if (isNaN(d)) return v;
+  return d.toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: true });
+}
+const METHOD_LABEL = { upi: "UPI", cash: "Cash", razorpay: "Razorpay", bank: "Bank", other: "Other" };
+
+function MiniStat({ label, value, tone = "navy", sub }) {
+  const fg = { navy: C.navy, success: C.success, amber: C.amber, orange: C.orangeDeep }[tone] || C.navy;
+  return (
+    <div className="rounded-2xl px-5 py-4" style={{ background: C.white, border: `1px solid ${C.line}` }}>
+      <div className="text-xs sb-body" style={{ color: C.slate }}>{label}</div>
+      <div className="text-2xl font-bold sb-display mt-1" style={{ color: fg }}>{value}</div>
+      {sub && <div className="text-[11px] sb-body mt-1" style={{ color: C.slateLight }}>{sub}</div>}
+    </div>
+  );
+}
+
+function AreaLoader() {
+  return (
+    <div className="flex items-center gap-2 text-sm sb-body py-16 justify-center" style={{ color: C.slateLight }}>
+      <Loader2 size={16} className="animate-spin" /> Loading...
+    </div>
+  );
+}
+
+function AreaError({ msg, onRetry }) {
+  return (
+    <div className="rounded-xl px-4 py-3 flex items-start gap-2.5 text-xs sb-body" style={{ background: C.dangerSoft, color: C.danger }}>
+      <AlertTriangle size={15} className="mt-0.5 shrink-0" />
+      <div className="flex-1">{msg}</div>
+      {onRetry && <button onClick={onRetry} className="font-bold underline">Dobara</button>}
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------------- */
+/* Meri Profile                                                            */
+/* ---------------------------------------------------------------------- */
+function ProfileArea({ me, onReload, onGo }) {
+  if (!me) return <AreaLoader />;
+  const p = me.profile || {};
+  const s = me.stats || {};
+  const initials = (p.full_name || p.username || "SB").split(" ").map((x) => x[0]).filter(Boolean).slice(0, 2).join("").toUpperCase();
+  return (
+    <div>
+      <div className="rounded-2xl p-6 mb-6 flex flex-col sm:flex-row sm:items-center gap-5" style={{ background: "linear-gradient(155deg, #16224F, #0B1642)" }}>
+        <div className="w-16 h-16 rounded-2xl flex items-center justify-center text-xl font-bold sb-display shrink-0" style={{ background: C.orange, color: C.white }}>{initials}</div>
+        <div className="flex-1 min-w-0">
+          <div className="sb-display font-bold text-xl" style={{ color: C.white }}>{p.full_name || p.username}</div>
+          <div className="text-sm sb-body mt-0.5" style={{ color: "#B7BEDB" }}>@{p.username} · Onboarding partner</div>
+          <div className="flex flex-wrap gap-x-5 gap-y-1.5 mt-3 text-xs sb-body" style={{ color: "#D5DAEE" }}>
+            {p.phone && <span className="inline-flex items-center gap-1.5"><Phone size={13} /> {p.phone}</span>}
+            {p.email && <span className="inline-flex items-center gap-1.5"><Mail size={13} /> {p.email} <BadgeCheck size={13} color="#34D399" /></span>}
+            {p.city && <span className="inline-flex items-center gap-1.5"><MapPin size={13} /> {p.city}</span>}
+          </div>
+        </div>
+        <div className="text-xs sb-body" style={{ color: "#8B93B8" }}>Joined {fmtWhen(p.created_at).split(",")[0]}</div>
+      </div>
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+        <MiniStat label="Meri applications" value={s.applications ?? 0} sub={`${s.in_progress ?? 0} chal rahi`} />
+        <MiniStat label="Complete hui" value={s.completed ?? 0} tone="success" />
+        <MiniStat label="QR mere paas" value={s.qr_in_hand ?? 0} tone="orange" sub={`${s.qr_used ?? 0} dukaan par lage`} />
+        <MiniStat label="Payment collected" value={inr(s.collected)} tone="success" sub={`Aaj ${inr(s.collected_today)}`} />
+      </div>
+
+      <div className="grid sm:grid-cols-3 gap-3">
+        {[
+          ["Nayi onboarding", "Dukaan onboard karein", PlusCircle, "onboard"],
+          ["Mere QR", "QR scan karke ID par chadhayein", QrCode, "myqr"],
+          ["Payment collected", "Kitna collect kiya", Wallet, "payments"],
+        ].map(([t, sub, Icon, k]) => (
+          <button key={k} onClick={() => onGo(k)} className="rounded-2xl p-4 text-left flex items-center gap-3" style={{ background: C.white, border: `1px solid ${C.line}` }}>
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style={{ background: C.sky }}><Icon size={18} color={C.navy} /></div>
+            <div className="flex-1"><div className="text-sm font-semibold sb-body" style={{ color: C.ink }}>{t}</div><div className="text-xs sb-body" style={{ color: C.slateLight }}>{sub}</div></div>
+            <ChevronRight size={16} color={C.slateLight} />
+          </button>
+        ))}
+      </div>
+      <button onClick={onReload} className="mt-5 text-xs font-semibold sb-body" style={{ color: C.navy }}>Refresh</button>
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------------- */
+/* Mere QR — scan karke apni ID par chadhana                               */
+/* ---------------------------------------------------------------------- */
+function ClaimScannerModal({ onClose, onClaimed }) {
+  const { videoRef, ready, error } = useCameraStream({ video: { facingMode: { ideal: "environment" } }, audio: false }, true);
+  const canvasRef = useRef(null);
+  const busyRef = useRef(false);
+  const lastRef = useRef({ text: "", at: 0 });
+  const [log, setLog] = useState([]); // [{ok, text}]
+  if (!canvasRef.current) canvasRef.current = document.createElement("canvas");
+
+  useEffect(() => {
+    if (!ready) return;
+    let raf;
+    let stopped = false;
+    const tick = async () => {
+      if (stopped) return;
+      const video = videoRef.current;
+      if (!busyRef.current && video && video.readyState === video.HAVE_ENOUGH_DATA) {
+        const canvas = canvasRef.current;
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        const ctx = canvas.getContext("2d", { willReadFrequently: true });
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const code = jsQR(img.data, img.width, img.height);
+        const now = Date.now();
+        if (code && code.data && !(code.data === lastRef.current.text && now - lastRef.current.at < 4000)) {
+          lastRef.current = { text: code.data, at: now };
+          busyRef.current = true;
+          try { navigator.vibrate && navigator.vibrate(60); } catch { /* ignore */ }
+          try {
+            const r = await claimQr(code.data);
+            setLog((l) => [{ ok: true, text: r.message || `${r.qr_id} jud gaya` }, ...l].slice(0, 6));
+            onClaimed();
+          } catch (e) {
+            setLog((l) => [{ ok: false, text: e.message }, ...l].slice(0, 6));
+          }
+          setTimeout(() => { busyRef.current = false; }, 900);
+        }
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => { stopped = true; cancelAnimationFrame(raf); };
+  }, [ready]);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center px-4" style={{ background: "rgba(11,22,66,0.85)" }}>
+      <div className="rounded-2xl overflow-hidden w-full max-w-md" style={{ background: C.navyDeep }}>
+        <div className="flex items-center justify-between px-4 py-3.5">
+          <div className="text-sm font-semibold sb-body" style={{ color: C.white }}>QR scan karke ID par chadhayein</div>
+          <button onClick={onClose} className="w-8 h-8 rounded-full flex items-center justify-center" style={{ background: "#16224F" }} aria-label="Close">
+            <X size={15} color={C.white} />
+          </button>
+        </div>
+        <div className="relative" style={{ aspectRatio: "4 / 3", background: "#000" }}>
+          <video ref={videoRef} playsInline muted className="w-full h-full object-cover" />
+          {ready && (
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <div className="w-48 h-48 rounded-2xl" style={{ border: `3px solid ${C.orange}` }} />
+            </div>
+          )}
+          {!ready && !error && <div className="absolute inset-0 flex items-center justify-center"><Loader2 size={22} color={C.white} className="animate-spin" /></div>}
+          {error && <div className="absolute inset-0 flex items-center justify-center px-6 text-center text-xs sb-body" style={{ color: C.white }}>{error}</div>}
+        </div>
+        <div className="px-4 py-3 text-center text-xs sb-body" style={{ color: "#8B93B8" }}>
+          Ek ke baad ek QR camera ke saamne laaiye. Har QR apne aap ID par chadh jayega.
+        </div>
+        {log.length > 0 && (
+          <div className="px-4 pb-4 flex flex-col gap-1.5">
+            {log.map((l, i) => (
+              <div key={i} className="rounded-lg px-3 py-2 text-xs sb-body flex items-start gap-2" style={{ background: l.ok ? "rgba(31,157,85,0.18)" : "rgba(225,72,63,0.18)", color: l.ok ? "#86EFAC" : "#FCA5A5" }}>
+                {l.ok ? <CheckCircle2 size={14} className="shrink-0 mt-px" /> : <XCircle size={14} className="shrink-0 mt-px" />} {l.text}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function MyQrArea({ onChanged }) {
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState("");
+  const [scan, setScan] = useState(false);
+  const [manual, setManual] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState(null);
+  const [tab, setTab] = useState("available");
+
+  const load = React.useCallback(async () => {
+    try { setErr(""); setData(await fetchMyQr()); } catch (e) { setErr(e.message); }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const addManual = async () => {
+    if (!manual.trim()) return;
+    setBusy(true); setMsg(null);
+    try { const r = await claimQr(manual.trim()); setMsg({ ok: true, text: r.message }); setManual(""); load(); onChanged(); }
+    catch (e) { setMsg({ ok: false, text: e.message }); }
+    finally { setBusy(false); }
+  };
+
+  if (!data && !err) return <AreaLoader />;
+  const list = (data?.qr_codes || []).filter((q) => (tab === "available" ? q.status === "available" : q.status !== "available"));
+  const c = data?.counts || {};
+
+  return (
+    <div>
+      {err && <div className="mb-4"><AreaError msg={err} onRetry={load} /></div>}
+      <div className="grid grid-cols-2 gap-3 mb-6">
+        <MiniStat label="Mere paas (lagane ke liye)" value={c.available ?? 0} tone="orange" />
+        <MiniStat label="Dukaan par lag chuke" value={c.assigned ?? 0} tone="success" />
+      </div>
+
+      <div className="rounded-2xl p-5 mb-6" style={{ background: C.white, border: `1px solid ${C.line}` }}>
+        <div className="text-sm font-semibold sb-body mb-1" style={{ color: C.ink }}>Apne paas wale QR ID par chadhayein</div>
+        <div className="text-xs sb-body mb-4" style={{ color: C.slateLight }}>
+          Sirf wahi QR chadhega jo admin ki list me hai aur kisi aur ke paas nahi hai. Dukaan par sirf aapki ID wala QR lagega.
+        </div>
+        <button onClick={() => setScan(true)} className="w-full flex items-center justify-center gap-2 text-sm font-bold sb-body py-3.5 rounded-xl mb-3" style={{ background: C.navy, color: C.white }}>
+          <ScanLine size={16} /> Camera se QR scan karein
+        </button>
+        <div className="flex items-center gap-2 rounded-xl px-3.5 py-2.5" style={{ background: C.sky, border: `1px solid ${C.line}` }}>
+          <QrCode size={16} color={C.slateLight} />
+          <input value={manual} onChange={(e) => setManual(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addManual()} placeholder="Ya QR ID likhein: QR-SB-000237" className="w-full bg-transparent outline-none text-sm sb-mono uppercase" style={{ color: C.ink }} />
+          <button onClick={addManual} disabled={busy || !manual.trim()} className="text-xs font-bold sb-body px-3 py-2 rounded-lg shrink-0" style={{ background: C.navy, color: C.white, opacity: busy || !manual.trim() ? 0.5 : 1 }}>
+            {busy ? "..." : "Jodein"}
+          </button>
+        </div>
+        {msg && (
+          <div className="mt-3 rounded-xl px-3.5 py-2.5 text-xs sb-body flex items-start gap-2" style={{ background: msg.ok ? C.successSoft : C.dangerSoft, color: msg.ok ? C.success : C.danger }}>
+            {msg.ok ? <CheckCircle2 size={14} className="shrink-0 mt-px" /> : <AlertTriangle size={14} className="shrink-0 mt-px" />} {msg.text}
+          </div>
+        )}
+      </div>
+
+      <div className="flex gap-2 mb-4">
+        {[["available", `Mere paas (${c.available ?? 0})`], ["used", `Lag chuke (${(c.assigned ?? 0) + (c.damaged ?? 0)})`]].map(([k, l]) => (
+          <button key={k} onClick={() => setTab(k)} className="px-4 py-2.5 rounded-xl text-sm font-semibold sb-body" style={{ background: tab === k ? C.navy : C.white, color: tab === k ? C.white : C.slate, border: `1px solid ${tab === k ? C.navy : C.line}` }}>{l}</button>
+        ))}
+      </div>
+      <div className="rounded-2xl overflow-hidden" style={{ border: `1px solid ${C.line}`, background: C.white }}>
+        {list.length === 0 ? (
+          <div className="text-center py-12 text-sm sb-body" style={{ color: C.slateLight }}>{tab === "available" ? "Abhi aapki ID par koi QR nahi. Upar se scan karke jodiye." : "Abhi koi QR dukaan par nahi laga."}</div>
+        ) : list.map((q, i) => (
+          <div key={q.id} className="flex items-center gap-3 px-5 py-3.5" style={{ borderTop: i ? `1px solid ${C.line}` : "none" }}>
+            <div className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0" style={{ background: C.sky }}><QrCode size={16} color={C.navy} /></div>
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-semibold sb-mono" style={{ color: C.ink }}>{q.id}</div>
+              <div className="text-xs sb-body truncate" style={{ color: C.slateLight }}>
+                {q.status === "assigned" ? `${q.shop_name || "Dukaan"} · ${fmtWhen(q.assigned_at)}` : `${q.category || "QR"} · ID par ${fmtWhen(q.held_at)}`}
+              </div>
+            </div>
+            <StatusPill status={q.status} />
+          </div>
+        ))}
+      </div>
+      {scan && <ClaimScannerModal onClose={() => { setScan(false); load(); }} onClaimed={() => { load(); onChanged(); }} />}
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------------- */
+/* Payment collected                                                       */
+/* ---------------------------------------------------------------------- */
+function PaymentsArea() {
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState("");
+  const load = React.useCallback(async () => {
+    try { setErr(""); setData(await fetchMyPayments()); } catch (e) { setErr(e.message); }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+  if (!data && !err) return <AreaLoader />;
+  const t = data?.totals || {};
+  const items = data?.items || [];
+  return (
+    <div>
+      {err && <div className="mb-4"><AreaError msg={err} onRetry={load} /></div>}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+        <MiniStat label="Aaj" value={inr(t.today)} tone="success" />
+        <MiniStat label="Is mahine" value={inr(t.month)} tone="success" />
+        <MiniStat label="Total collected" value={inr(t.total)} tone="navy" sub={`${t.count || 0} dukaan`} />
+        <MiniStat label="Cash / UPI" value={`${inr((t.by_method || {}).cash)} / ${inr((t.by_method || {}).upi)}`} tone="orange" />
+      </div>
+      <div className="rounded-2xl overflow-hidden" style={{ border: `1px solid ${C.line}`, background: C.white }}>
+        <div className="px-5 py-3 text-xs font-semibold sb-body" style={{ background: C.sky, color: C.slateLight }}>Har payment</div>
+        {items.length === 0 ? (
+          <div className="text-center py-12 text-sm sb-body" style={{ color: C.slateLight }}>Abhi tak koi payment collect nahi hua.</div>
+        ) : items.map((p, i) => (
+          <div key={p.id} className="flex items-center gap-3 px-5 py-3.5" style={{ borderTop: i ? `1px solid ${C.line}` : "none" }}>
+            <div className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0" style={{ background: C.successSoft }}><Receipt size={16} color={C.success} /></div>
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-semibold sb-body truncate" style={{ color: C.ink }}>{p.shop_name}</div>
+              <div className="text-xs sb-body truncate" style={{ color: C.slateLight }}>{p.id} · {METHOD_LABEL[p.payment_method] || p.payment_method || "-"}{p.payment_txn_id ? ` · ${p.payment_txn_id}` : ""} · {fmtWhen(p.paid_at)}</div>
+            </div>
+            <div className="text-sm font-bold sb-display" style={{ color: C.success }}>{inr(p.payment_amount)}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------------- */
+/* Complete application — sirf history (edit nahi)                          */
+/* ---------------------------------------------------------------------- */
+function HistoryModal({ app, onClose }) {
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState("");
+  useEffect(() => {
+    fetchApplicationHistory(app.id).then(setData).catch((e) => setErr(e.message));
+  }, [app.id]);
+  const a = data?.application;
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:px-4" style={{ background: "rgba(11,22,66,0.55)" }}>
+      <div className="w-full sm:max-w-lg max-h-[92vh] flex flex-col rounded-t-2xl sm:rounded-2xl" style={{ background: C.white }}>
+        <div className="flex items-start justify-between gap-3 px-5 pt-5 pb-3" style={{ borderBottom: `1px solid ${C.line}` }}>
+          <div className="min-w-0">
+            <div className="text-base font-bold sb-display truncate" style={{ color: C.ink }}>{app.name}</div>
+            <div className="text-xs sb-body mt-0.5" style={{ color: C.slateLight }}>{app.id} · {app.category}</div>
+          </div>
+          <button onClick={onClose} aria-label="Close"><X size={18} color={C.slateLight} /></button>
+        </div>
+        <div className="overflow-y-auto sb-scroll px-5 py-4">
+          <div className="rounded-xl px-3.5 py-3 mb-4 flex items-start gap-2.5 text-xs sb-body" style={{ background: C.successSoft, color: C.success }}>
+            <Lock size={14} className="shrink-0 mt-px" />
+            Ye application complete ho chuki hai. Ab isme badlav nahi ho sakta, sirf detail aur history dekh sakte hain.
+          </div>
+          {err && <AreaError msg={err} />}
+          {!data && !err && <AreaLoader />}
+          {a && (
+            <>
+              <div className="rounded-xl mb-5" style={{ border: `1px solid ${C.line}` }}>
+                <PreviewRow label="Owner" value={`${a.owner_name} · ${a.phone}`} />
+                {a.email && <PreviewRow label="Email" value={a.email} />}
+                <PreviewRow label="QR" value={a.qr_id} />
+                <PreviewRow label="Payment" value={`${inr(a.payment_amount)} · ${METHOD_LABEL[a.payment_method] || a.payment_method || "-"}`} />
+                <PreviewRow label="Address" value={[a.address, a.city].filter(Boolean).join(", ") || "-"} last />
+              </div>
+              <div className="text-xs font-bold sb-body mb-3 flex items-center gap-1.5" style={{ color: C.slate }}><History size={14} /> HISTORY</div>
+              <ol className="relative ml-1.5 pl-5" style={{ borderLeft: `2px solid ${C.line}` }}>
+                {(data.history || []).map((h, i) => (
+                  <li key={i} className="relative pb-4">
+                    <span className="absolute -left-[27px] top-1 w-3 h-3 rounded-full" style={{ background: C.navy, boxShadow: `0 0 0 4px ${C.white}` }} />
+                    <div className="text-sm font-semibold sb-body" style={{ color: C.ink }}>{h.label}{h.detail ? <span className="font-normal" style={{ color: C.slate }}> · {h.detail}</span> : null}</div>
+                    <div className="text-xs sb-body" style={{ color: C.slateLight }}>{fmtWhen(h.at)}{h.by ? ` · ${h.by}` : ""}</div>
+                  </li>
+                ))}
+              </ol>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------------- */
 /* Login                                                                   */
 /* ---------------------------------------------------------------------- */
 function LoginPage({ onLoggedIn }) {
@@ -2263,6 +2686,7 @@ export default function App() {
   const [resumeApp, setResumeApp] = useState(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
+  const [me, setMe] = useState(null);
 
   const handleAuthError = (e) => {
     if (e instanceof AuthError) {
@@ -2288,8 +2712,16 @@ export default function App() {
     }
   };
 
+  const refreshMe = async () => {
+    try {
+      setMe(await fetchMe());
+    } catch (e) {
+      handleAuthError(e);
+    }
+  };
+
   const refreshAll = async () => {
-    await Promise.all([refreshApplications(), refreshQrBank()]);
+    await Promise.all([refreshApplications(), refreshQrBank(), refreshMe()]);
   };
 
   useEffect(() => {
@@ -2327,8 +2759,11 @@ export default function App() {
 
   const titles = {
     onboard: { title: "New partner onboarding", sub: "Register a shop, verify it, and activate a physical QR — end to end." },
-    applications: { title: "Applications", sub: "Review submissions from the SlotB partner app." },
+    applications: { title: "Applications", sub: "Aapko assign hui dukaanein. Complete hone ke baad sirf history dikhti hai." },
     qrbank: { title: "QR bank", sub: "Every printed QR code and the shop it's permanently mapped to." },
+    profile: { title: "Meri profile", sub: "Aapki details aur ab tak ka kaam." },
+    myqr: { title: "Mere QR", sub: "Jo QR aapke paas hain, unhe scan karke apni ID par chadhaiye." },
+    payments: { title: "Payment collected", sub: "Aapne dukaanon se kitni onboarding fee collect ki." },
   };
 
   const currentTitle =
@@ -2355,12 +2790,20 @@ export default function App() {
     setArea("onboard");
   };
 
+  // Sidebar / bottom nav: kisi bhi section par jao
+  const goTo = (key) => {
+    setResumeApp(null);
+    setArea(key);
+    if (key === "profile") refreshMe();
+    if (key === "applications") refreshApplications();
+  };
+
   return (
     <div className="min-h-screen flex sb-body" style={{ background: C.sky }}>
       {FONTS}
       <Sidebar
         area={area}
-        setArea={goToNewOnboarding}
+        setArea={goTo}
         username={username}
         onLogout={async () => {
           await logout();
@@ -2373,11 +2816,13 @@ export default function App() {
         {[
           { k: "onboard", label: "Onboard", Icon: PlusCircle },
           { k: "applications", label: "Applications", Icon: ListChecks },
-          { k: "qrbank", label: "QR Bank", Icon: QrCode },
+          { k: "myqr", label: "Mere QR", Icon: QrCode },
+          { k: "payments", label: "Payment", Icon: Wallet },
+          { k: "profile", label: "Profile", Icon: CircleUser },
         ].map((n) => (
           <button
             key={n.k}
-            onClick={() => (n.k === "onboard" ? goToNewOnboarding() : (setResumeApp(null), setArea(n.k)))}
+            onClick={() => goTo(n.k)}
             className="flex-1 flex flex-col items-center gap-1 py-2.5"
             style={{ color: area === n.k ? C.orange : "#8B93B8" }}
           >
@@ -2388,7 +2833,7 @@ export default function App() {
       </div>
 
       <main className="flex-1 px-5 sm:px-10 py-8 pb-24 md:pb-8 max-w-6xl">
-        <TopBar title={currentTitle.title} sub={currentTitle.sub} />
+        <TopBar title={currentTitle.title} sub={currentTitle.sub} profile={me?.profile} onProfile={() => goTo("profile")} />
 
         {loadError && (
           <div
@@ -2412,7 +2857,7 @@ export default function App() {
                 key={resumeApp ? resumeApp.id : "new"}
                 resumeApplication={resumeApp}
                 onExitResume={exitResume}
-                onApplicationsChanged={refreshApplications}
+                onApplicationsChanged={() => { refreshApplications(); refreshMe(); }}
                 onQrBankChanged={refreshQrBank}
               />
             )}
@@ -2422,6 +2867,9 @@ export default function App() {
             {area === "qrbank" && (
               <QrBankArea qrBank={qrBank} applications={applications} onDataChanged={refreshAll} />
             )}
+            {area === "profile" && <ProfileArea me={me} onReload={refreshMe} onGo={goTo} />}
+            {area === "myqr" && <MyQrArea onChanged={refreshMe} />}
+            {area === "payments" && <PaymentsArea />}
           </>
         )}
       </main>
