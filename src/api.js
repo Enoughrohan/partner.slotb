@@ -7,7 +7,7 @@
  * ---------------------------------------------------------------------
  */
 
-const API_BASE = "https://slotb.in";
+const API_BASE = (import.meta.env.VITE_API_BASE || "https://slotb.in").replace(/\/$/, "");
 const TOKEN_KEY = "slotb_ops_token";
 const USERNAME_KEY = "slotb_ops_username";
 
@@ -118,6 +118,9 @@ function normalizeApplication(row) {
     status: row.status,
     qr: row.qr_id,
     paymentStatus: row.payment_status,
+    paymentAmount: row.payment_amount != null ? Number(row.payment_amount) : null,
+    paymentMethod: row.payment_method || null,
+    isComplete: Number(row.is_complete) === 1 || (row.payment_status === "paid" && !!row.qr_id),
     assignedTo: row.assigned_to || null,
     assignedName: row.assigned_name || null,
     latitude: row.latitude != null ? Number(row.latitude) : null,
@@ -334,4 +337,41 @@ export async function uploadShopPhoto(file) {
   });
   const data = await handle(res);
   return data.url;
+}
+
+/* ---------------------- Onboarding partner ka apna data ---------------------- */
+
+async function opsPartner(params, body) {
+  const url = `${API_BASE}/api_ops_partner.php${params ? `?${new URLSearchParams(params)}` : ""}`;
+  const res = await fetch(url, body
+    ? { method: "POST", headers: authHeaders({ "Content-Type": "application/json" }), body: JSON.stringify(body) }
+    : { headers: authHeaders() });
+  return handle(res);
+}
+
+// { profile, stats }
+export const fetchMe = () => opsPartner({ action: "me" });
+
+// { qr_codes:[{id,status,category,shop_name,application_id,held_at,assigned_at}], counts }
+export const fetchMyQr = () => opsPartner({ action: "my_qr" });
+
+// Scan kiya QR apni ID par chadhao. { ok, qr_id, already, message }
+export const claimQr = (raw) => opsPartner(null, { action: "claim_qr", qr: raw });
+
+// { items:[...], totals:{ total, today, month, count, by_method } }
+export const fetchMyPayments = () => opsPartner({ action: "payments" });
+
+// { application, services, complete, history:[{label, by, at, detail}] }
+export const fetchApplicationHistory = (id) => opsPartner({ action: "history", id });
+
+// Admin panel me set ki gayi onboarding fee (na mile to 499)
+export async function fetchOnboardingFee() {
+  try {
+    const res = await fetch(`${API_BASE}/api_public_content.php?action=settings`);
+    const d = await res.json();
+    const fee = Number(d?.settings?.onboarding_fee);
+    return fee > 0 ? fee : 499;
+  } catch {
+    return 499;
+  }
 }
