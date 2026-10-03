@@ -1,3 +1,9 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Phone par form screen se bahar na nikle: flex ke andar wale hisse sikud sakein */
+main.flex-1,
+main .flex-1 {
+  min-width: 0;
+}
