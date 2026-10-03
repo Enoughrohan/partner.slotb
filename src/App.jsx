@@ -439,6 +439,54 @@ function ServicePicker({ catalog, loading, selected, onChange }) {
   );
 }
 
+// Suvidhayein (customer app me chips ki tarah dikhti hain)
+const AMENITY_PRESETS = {
+  Library: ["AC", "Wi-Fi", "Reading Hall", "Drinking Water", "Locker", "CCTV", "Power Backup", "Washroom", "Parking", "Newspaper"],
+  Gym: ["AC", "Cardio", "Weights", "Personal Trainer", "Locker", "Shower", "Parking", "Music", "Steam", "Diet Plan"],
+};
+
+function AmenityChips({ category, value, onChange }) {
+  const [custom, setCustom] = useState("");
+  const list = Array.isArray(value) ? value : [];
+  const presets = AMENITY_PRESETS[category] || [];
+  const all = [...presets, ...list.filter((x) => !presets.includes(x))];
+  const toggle = (a) => onChange(list.includes(a) ? list.filter((x) => x !== a) : [...list, a]);
+  const add = () => {
+    const parts = custom.split(",").map((x) => x.trim()).filter(Boolean);
+    if (!parts.length) return;
+    onChange([...list, ...parts.filter((x) => !list.includes(x))]);
+    setCustom("");
+  };
+  return (
+    <div>
+      <div className="text-xs font-semibold sb-body mb-2" style={{ color: C.slate }}>Suvidhayein (customer app me dikhengi)</div>
+      <div className="flex flex-wrap gap-2 mb-2">
+        {all.map((a) => {
+          const on = list.includes(a);
+          return (
+            <button key={a} type="button" onClick={() => toggle(a)}
+              className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold sb-body"
+              style={{ background: on ? C.navy : C.sky, color: on ? C.white : C.slate, border: `1px solid ${on ? C.navy : C.line}` }}>
+              {on && <Check size={13} />}
+              {a}
+            </button>
+          );
+        })}
+      </div>
+      <div className="flex gap-2">
+        <div className="flex-1 flex items-center rounded-xl px-3 py-2.5" style={{ background: C.sky, border: `1px solid ${C.line}` }}>
+          <input value={custom} onChange={(e) => setCustom(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); add(); } }}
+            placeholder="Aur kuch? Jaise: Cabin, Printer" className="w-full bg-transparent outline-none text-sm sb-body" style={{ color: C.ink }} />
+        </div>
+        <button type="button" onClick={add} className="inline-flex items-center gap-1 rounded-xl px-3 text-xs font-semibold sb-body"
+          style={{ background: C.white, color: C.navy, border: `1px solid ${C.line}` }}>
+          <Plus size={14} /> Add
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // Structured detail fields for Gym / Library / Doctor.
 function DetailFields({ group, category, detail, setDetail }) {
   const d = (k) => (v) => setDetail({ ...detail, [k]: v });
@@ -466,7 +514,8 @@ function DetailFields({ group, category, detail, setDetail }) {
           <TextField label="Number of batches" icon={Users} value={dv("batchCount")} onChange={d("batchCount")} type="number" placeholder="3" />
           <TextField label="Batch timings" icon={Clock} value={dv("batchTimings")} onChange={d("batchTimings")} placeholder="6–8 AM, 5–7 PM" />
         </div>
-        <TextField label="Facilities" icon={Dumbbell} value={dv("facilities")} onChange={d("facilities")} placeholder="Cardio, weights, trainer, locker" />
+        <AmenityChips category="Gym" value={detail.amenities} onChange={(v) => setDetail({ ...detail, amenities: v })} />
+        <TextField label="Admission fee (ek baar, ₹)" icon={IndianRupee} value={dv("admissionFee")} onChange={d("admissionFee")} type="number" placeholder="0" />
         <RepeatRows
           label="Membership plans"
           addLabel="Add plan"
@@ -485,7 +534,11 @@ function DetailFields({ group, category, detail, setDetail }) {
   if (category === "Library") {
     return (
       <div className="flex flex-col gap-4 mt-4">
-        <TextField label="Total seats" icon={Users} value={dv("totalSeats")} onChange={d("totalSeats")} type="number" placeholder="60" />
+        <div className="grid sm:grid-cols-2 gap-4">
+          <TextField label="Total seats" icon={Users} value={dv("totalSeats")} onChange={d("totalSeats")} type="number" placeholder="60" />
+          <TextField label="Admission fee (ek baar, ₹)" icon={IndianRupee} value={dv("admissionFee")} onChange={d("admissionFee")} type="number" placeholder="0" />
+        </div>
+        <AmenityChips category="Library" value={detail.amenities} onChange={(v) => setDetail({ ...detail, amenities: v })} />
         <RepeatRows
           label="Seat types & price"
           addLabel="Add seat type"
