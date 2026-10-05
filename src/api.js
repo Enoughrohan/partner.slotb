@@ -375,3 +375,24 @@ export async function fetchOnboardingFee() {
     return 499;
   }
 }
+
+/** Onboarding fee + payment options (admin Settings se): Cash / UPI (admin ka QR) */
+export async function fetchPaymentConfig() {
+  const def = { fee: 499, cash: true, upi: true, upiQr: "", upiId: "", payee: "Slotb" };
+  try {
+    const res = await fetch(`${API_BASE}/api_public_content.php?action=settings`);
+    const d = await res.json();
+    const s = d?.settings || {};
+    const fee = Number(s.onboarding_fee);
+    return {
+      fee: fee > 0 ? fee : 499,
+      cash: s.onboarding_cash_enabled !== "0",
+      upi: s.onboarding_upi_enabled !== "0",
+      upiQr: s.onboarding_upi_qr || "",
+      upiId: s.onboarding_upi_id || "",
+      payee: s.onboarding_payee_name || "Slotb",
+    };
+  } catch {
+    return def;
+  }
+}
