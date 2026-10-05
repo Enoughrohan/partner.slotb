@@ -54,10 +54,10 @@ function loadLeaflet() {
       const s = document.createElement("script");
       s.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
       s.async = true;
-      s.onload = () => (window.L ? resolve(window.L) : reject(new Error("Map load nahi hua")));
+      s.onload = () => (window.L ? resolve(window.L) : reject(new Error("Could not load the map")));
       s.onerror = () => {
         leafletPromise = null;
-        reject(new Error("Map load nahi hua — internet check karein"));
+        reject(new Error("Could not load the map. Please check your internet connection."));
       };
       document.head.appendChild(s);
     });
@@ -77,10 +77,10 @@ function pinIcon(L) {
 }
 
 function accTone(acc) {
-  if (acc == null) return { color: T.slate, bg: T.sky, text: "Pin se lagaya gaya" };
-  if (acc <= 30) return { color: T.success, bg: T.successSoft, text: `Sahi location · ±${acc} m` };
-  if (acc <= 100) return { color: T.amber, bg: T.amberSoft, text: `Theek-thaak · ±${acc} m` };
-  return { color: T.danger, bg: T.dangerSoft, text: `Kamzor signal · ±${acc} m` };
+  if (acc == null) return { color: T.slate, bg: T.sky, text: "Set manually with pin" };
+  if (acc <= 30) return { color: T.success, bg: T.successSoft, text: `Accurate location · ±${acc} m` };
+  if (acc <= 100) return { color: T.amber, bg: T.amberSoft, text: `Moderate accuracy · ±${acc} m` };
+  return { color: T.danger, bg: T.dangerSoft, text: `Weak signal · ±${acc} m` };
 }
 
 export default function ShopLocationPicker({ value, onChange, onAddress, autoFillAddress }) {
@@ -239,11 +239,11 @@ export default function ShopLocationPicker({ value, onChange, onAddress, autoFil
   function startGps() {
     setGpsErr("");
     if (!("geolocation" in navigator)) {
-      setGpsErr("Is browser me location support nahi hai. Map pe tap karke pin lagaiye.");
+      setGpsErr("Location is not supported in this browser. Tap on the map to drop a pin.");
       return;
     }
     if (typeof window !== "undefined" && window.isSecureContext === false) {
-      setGpsErr("Location sirf https site pe milti hai.");
+      setGpsErr("Location is only available on a secure (https) site.");
       return;
     }
     stopWatch();
@@ -269,16 +269,16 @@ export default function ShopLocationPicker({ value, onChange, onAddress, autoFil
         stopWatch();
         if (err.code === 1) {
           setGpsErr(
-            "Location ki permission band hai. Browser ke address bar me lock icon dabakar Location ko Allow karein, phir dobara try karein — ya map pe tap karke pin lagaiye."
+            "Location permission is blocked. Tap the lock icon in the browser address bar, allow Location, and try again. Or tap on the map to drop a pin."
           );
         } else if (err.code === 3) {
           setGpsErr(
             bestRef.current
               ? ""
-              : "GPS signal nahi mila. Dukaan ke bahar khule me aakar dobara try karein, ya map pe pin lagaiye."
+              : "No GPS signal found. Step outside the shop into an open area and try again, or drop a pin on the map."
           );
         } else {
-          setGpsErr("Location nahi mil paayi. Phone ki Location (GPS) on karke dobara try karein.");
+          setGpsErr("Could not get your location. Turn on Location (GPS) on your phone and try again.");
         }
       },
       { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 }
@@ -299,7 +299,7 @@ export default function ShopLocationPicker({ value, onChange, onAddress, autoFil
           <div ref={mapEl} style={{ position: "absolute", inset: 0, zIndex: 0 }} data-testid="shop-map" />
           {!mapReady && !mapErr && (
             <div className="absolute inset-0 flex items-center justify-center gap-2 text-xs sb-body" style={{ color: T.slateLight }}>
-              <Loader2 size={14} className="animate-spin" /> Map load ho raha hai…
+              <Loader2 size={14} className="animate-spin" /> Loading map…
             </div>
           )}
           {mapErr && (
@@ -319,7 +319,7 @@ export default function ShopLocationPicker({ value, onChange, onAddress, autoFil
               style={{ background: T.navy, color: T.white, opacity: tracking ? 0.75 : 1 }}
             >
               {tracking ? <Loader2 size={16} className="animate-spin" /> : value?.source === "gps" ? <RefreshCw size={16} /> : <LocateFixed size={16} />}
-              {tracking ? "Live GPS le rahe hain…" : value?.source === "gps" ? "Location refresh karein" : "Use live location"}
+              {tracking ? "Getting live GPS…" : value?.source === "gps" ? "Refresh location" : "Use live location"}
             </button>
             {tracking && (
               <button
@@ -328,7 +328,7 @@ export default function ShopLocationPicker({ value, onChange, onAddress, autoFil
                 className="rounded-xl px-4 py-3 text-sm font-semibold sb-body"
                 style={{ background: T.white, color: T.navy, border: `1px solid ${T.line}` }}
               >
-                Yahi theek hai
+                Use this location
               </button>
             )}
           </div>
@@ -343,10 +343,10 @@ export default function ShopLocationPicker({ value, onChange, onAddress, autoFil
               <div className="flex-1 min-w-0">
                 <div className="text-xs font-semibold sb-body" style={{ color: tone.color }}>
                   {tone.text}
-                  {tracking ? " · sudhar raha hai" : ""}
+                  {tracking ? " · improving" : ""}
                 </div>
                 <div className="text-xs sb-body mt-0.5" style={{ color: T.ink }}>
-                  {geoBusy ? "Address dhoondh rahe hain…" : geo?.full || geo?.label || `${value.lat.toFixed(5)}, ${value.lng.toFixed(5)}`}
+                  {geoBusy ? "Finding address…" : geo?.full || geo?.label || `${value.lat.toFixed(5)}, ${value.lng.toFixed(5)}`}
                 </div>
                 <div className="flex flex-wrap items-center gap-3 mt-1.5">
                   <a
@@ -356,7 +356,7 @@ export default function ShopLocationPicker({ value, onChange, onAddress, autoFil
                     className="inline-flex items-center gap-1 text-xs font-semibold sb-body"
                     style={{ color: T.navy }}
                   >
-                    <ExternalLink size={12} /> Map me dekhein
+                    <ExternalLink size={12} /> View on map
                   </a>
                   {geo?.full && onAddress && (
                     <button
@@ -365,20 +365,20 @@ export default function ShopLocationPicker({ value, onChange, onAddress, autoFil
                       className="inline-flex items-center gap-1 text-xs font-semibold sb-body"
                       style={{ color: T.orange }}
                     >
-                      <MapPin size={12} /> Address me bharein
+                      <MapPin size={12} /> Use as address
                     </button>
                   )}
                 </div>
                 {value.accuracy != null && value.accuracy > 50 && !tracking && (
                   <div className="text-[11px] sb-body mt-1.5" style={{ color: T.slate }}>
-                    Pin dukaan ke darwaze par nahi hai to use khiskakar sahi jagah rakhiye.
+                    If the pin is not at the shop entrance, drag it to the correct spot.
                   </div>
                 )}
               </div>
             </div>
           ) : (
             <div className="text-xs sb-body" style={{ color: T.slate }}>
-              Dukaan ke andar ya darwaze par khade hokar <b>Use live location</b> dabaiye. GPS na chale to map pe tap karke pin lagaiye.
+              Stand inside the shop or at its entrance and tap <b>Use live location</b>. If GPS does not work, tap on the map to drop a pin.
             </div>
           )}
 
