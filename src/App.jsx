@@ -16,6 +16,9 @@ import {
   Mail,
   User,
   CreditCard,
+  Banknote,
+  Smartphone,
+  Copy,
   Building2,
   ArrowRight,
   LayoutGrid,
@@ -76,6 +79,7 @@ import {
   fetchMyPayments,
   fetchApplicationHistory,
   fetchOnboardingFee,
+  fetchPaymentConfig,
 } from "./api";
 
 /* ---------------------------------------------------------------------- */
@@ -701,12 +705,15 @@ function TopBar({ title, sub, profile, onProfile }) {
 /* Onboarding wizard                                                      */
 /* ---------------------------------------------------------------------- */
 const STEPS = ["Basic Details", "Photos & Location", "Preview", "Activate QR", "Payment", "Done"];
+// Ghar ki service (Electrician, Plumber, AC ...) ko QR nahi lagta — "Activate QR" step hi nahi
+const STEPS_NO_QR = [[0, "Basic Details"], [1, "Photos & Location"], [2, "Preview"], [4, "Payment"], [5, "Done"]];
 
-function StepRail({ step }) {
+function StepRail({ step, noQr }) {
+  const list = noQr ? STEPS_NO_QR : STEPS.map((s, i) => [i, s]);
   return (
     <div className="hidden lg:flex flex-col gap-1 w-56 shrink-0">
-      {STEPS.map((s, i) => {
-        const state = i < step ? "done" : i === step ? "active" : "todo";
+      {list.map(([idx, s], i) => {
+        const state = idx < step ? "done" : idx === step ? "active" : "todo";
         return (
           <div key={s} className="flex items-start gap-3 py-3">
             <div className="flex flex-col items-center">
@@ -720,7 +727,7 @@ function StepRail({ step }) {
               >
                 {state === "done" ? <CheckCircle2 size={15} /> : i + 1}
               </div>
-              {i < STEPS.length - 1 && (
+              {i < list.length - 1 && (
                 <div className="w-px flex-1 mt-1" style={{ background: C.line, minHeight: 22 }} />
               )}
             </div>
@@ -1013,7 +1020,18 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
   // QR pehle lag chuka ho (payment baaki) to seedha payment step
   const [step, setStep] = useState(resumeApplication ? (resumeApplication.qr ? 4 : 1) : 0);
   const [fee, setFee] = useState(499);
-  useEffect(() => { fetchOnboardingFee().then(setFee); }, []);
+  // payment: Cash ya UPI (admin ka QR) — Razorpay approve hone tak
+  const [payCfg, setPayCfg] = useState(null);
+  const [utr, setUtr] = useState("");
+  const [payConfirmed, setPayConfirmed] = useState(false);
+  useEffect(() => {
+    fetchPaymentConfig().then((c) => {
+      setFee(c.fee);
+      setPayCfg(c);
+      const upiReady = c.upi && (c.upiQr || c.upiId);
+      setMethod(upiReady ? "upi" : c.cash ? "cash" : "upi");
+    });
+  }, []);
   // onboarding partner ki ID par jo QR hain (sirf wahi laga sakta hai)
   const [myQr, setMyQr] = useState([]);
   const [myQrLoading, setMyQrLoading] = useState(false);
@@ -1129,6 +1147,9 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
   const selectedCat = categories.find((c) => c.name === form.category);
   const group = form.category ? catGroup(form.category, selectedCat?.kind) : null;
   const needsServicePicker = group === "salon" || group === "service";
+  // ghar ki service wale partner ko QR nahi dete
+  const noQr = group === "service";
+  const totalSteps = noQr ? 4 : 5;
 
   // load services whenever the category changes (only where a picker is shown)
   useEffect(() => {
@@ -1168,7 +1189,6 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
   const [assignedQr, setAssignedQr] = useState(resumeApplication?.qr || null);
   const [method, setMethod] = useState("upi");
   const [errorMsg, setErrorMsg] = useState("");
-  const [txnId] = useState(() => "SBP" + Math.floor(60000000 + Math.random() * 9000000));
   const [scannerOpen, setScannerOpen] = useState(false);
   const [cameraFor, setCameraFor] = useState(null); // "front" | "inside" | null
 
@@ -1281,12 +1301,46 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
     if (step === 3) loadMyQr();
   }, [step, loadMyQr]);
 
+  // ghar ki service: preview ke baad seedha payment (application bana do / location save)
+  const handleNoQrContinue = async () => {
+    setSubmitting(true);
+    setErrorMsg("");
+    try {
+      let appId = serverAppId;
+      if (!appId) {
+        const created = await createApplication(form, frontUrl, insideUrl, "ops_console");
+        appId = created.id;
+        setServerAppId(appId);
+      } else if (form.location) {
+        await updateApplicationLocation(appId, form.location);
+      }
+      setStep(4);
+    } catch (e) {
+      setErrorMsg("Could not save the application: " + e.message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const cleanUtr = utr.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
   const handleSubmitApplication = async () => {
+    if (!serverAppId) {
+      setErrorMsg("Application is not saved yet. Please go back and try again.");
+      return;
+    }
+    if (method === "upi" && cleanUtr.length < 6) {
+      setErrorMsg("Please enter the UPI transaction ID (UTR) from the payment app.");
+      return;
+    }
+    if (!payConfirmed) {
+      setErrorMsg(method === "cash" ? `Please confirm that you have collected ₹${fee} in cash.` : "Please confirm that the payment has been received.");
+      return;
+    }
     setSubmitting(true);
     setErrorMsg("");
     try {
       const appId = serverAppId;
-      const result = await markApplicationPaid(appId, txnId, fee, method);
+      const result = await markApplicationPaid(appId, method === "upi" ? cleanUtr : "", fee, method);
       setPaymentResult(result);
       onApplicationsChanged();
       setStep(5);
@@ -1299,7 +1353,7 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
 
   return (
     <div className="flex gap-10">
-      <StepRail step={step} />
+      <StepRail step={step} noQr={noQr} />
       <div className="flex-1 max-w-2xl">
         {resumeApplication && (
           <div
@@ -1317,7 +1371,7 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
         {step === 0 && (
           <Card>
             <SectionHeading
-              eyebrow="Step 1 of 5"
+              eyebrow={`Step 1 of ${totalSteps}`}
               title="Tell us about the business"
               sub="This information appears on the partner's public SlotB listing."
             />
@@ -1505,7 +1559,7 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
         {step === 1 && (
           <Card>
             <SectionHeading
-              eyebrow="Step 2 of 5"
+              eyebrow={`Step 2 of ${totalSteps}`}
               title="Shop photos & location"
               sub="Clear, real photos of the shop, and its exact location so customers can find it."
             />
@@ -1554,7 +1608,7 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
         {/* STEP 2 — preview */}
         {step === 2 && (
           <Card>
-            <SectionHeading eyebrow="Step 3 of 5" title="Review before submitting" sub="Double-check every detail — this becomes the partner's live profile." />
+            <SectionHeading eyebrow={`Step 3 of ${totalSteps}`} title="Review before submitting" sub="Double-check every detail — this becomes the partner's live profile." />
             <div className="grid sm:grid-cols-2 gap-3 mb-6">
               {[front, inside].map((img, i) => (
                 <div key={i} className="rounded-xl overflow-hidden h-32" style={{ background: C.sky }}>
@@ -1623,12 +1677,24 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
                   />
                 ))}
             <PreviewRow label="Verified by" value="On-ground onboarding partner" last />
+            {noQr && (
+              <div className="mt-5 rounded-xl px-4 py-3 flex items-start gap-2.5 text-xs sb-body" style={{ background: C.sky, color: C.slate }}>
+                <Wrench size={15} className="mt-0.5 shrink-0" color={C.navy} />
+                Home service partners do not need a QR code. The next step is payment.
+              </div>
+            )}
+            {errorMsg && step === 2 && (
+              <div className="mt-4 rounded-xl px-4 py-3 flex items-start gap-2.5 text-xs sb-body" style={{ background: C.dangerSoft, color: C.danger }}>
+                <AlertTriangle size={15} className="mt-0.5 shrink-0" />
+                {errorMsg}
+              </div>
+            )}
             <div className="flex justify-between mt-8">
               <GhostButton icon={ChevronLeft} onClick={() => setStep(1)}>
                 Back
               </GhostButton>
-              <PrimaryButton icon={ArrowRight} onClick={() => setStep(3)}>
-                Looks good, continue
+              <PrimaryButton icon={ArrowRight} onClick={noQr ? handleNoQrContinue : () => setStep(3)} disabled={submitting}>
+                {noQr ? (submitting ? "Saving..." : "Looks good, go to payment") : "Looks good, continue"}
               </PrimaryButton>
             </div>
           </Card>
@@ -1638,7 +1704,7 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
         {step === 3 && (
           <Card>
             <SectionHeading
-              eyebrow="Step 4 of 5"
+              eyebrow={`Step 4 of ${totalSteps}`}
               title="Activate the physical QR"
               sub="Every printed QR card carries a unique ID. Enter or scan it to link this exact code to this shop — permanently."
             />
@@ -1769,20 +1835,26 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
           </Card>
         )}
 
-        {/* STEP 4 — payment */}
+        {/* STEP 4 — payment (Cash / UPI) */}
         {step === 4 && (
           <Card>
-            <SectionHeading eyebrow="Step 5 of 5" title="Complete payment" sub="One-time activation fee. No monthly charges." />
+            <SectionHeading eyebrow={`Step ${totalSteps} of ${totalSteps}`} title="Collect activation fee" sub="One-time fee. No monthly charges. Choose how the shop owner is paying." />
 
-            <div
-              className="rounded-xl px-4 py-3.5 flex items-center gap-3 mb-5"
-              style={{ background: C.successSoft }}
-            >
-              <QrCode size={18} color={C.success} />
-              <div className="text-sm sb-body font-semibold" style={{ color: C.success }}>
-                {assignedQr} activated for {form.shopName || "this partner"}
+            {assignedQr ? (
+              <div className="rounded-xl px-4 py-3.5 flex items-center gap-3 mb-5" style={{ background: C.successSoft }}>
+                <QrCode size={18} color={C.success} />
+                <div className="text-sm sb-body font-semibold" style={{ color: C.success }}>
+                  {assignedQr} activated for {form.shopName || "this partner"}
+                </div>
               </div>
-            </div>
+            ) : noQr ? (
+              <div className="rounded-xl px-4 py-3.5 flex items-center gap-3 mb-5" style={{ background: C.sky }}>
+                <Wrench size={18} color={C.navy} />
+                <div className="text-sm sb-body font-semibold" style={{ color: C.ink }}>
+                  Home service partner · no QR code needed
+                </div>
+              </div>
+            ) : null}
 
             <div className="flex items-center justify-between rounded-xl px-4 py-4 mb-6" style={{ background: C.sky }}>
               <div>
@@ -1790,7 +1862,7 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
                   Partner activation fee
                 </div>
                 <div className="text-xs sb-body mt-0.5" style={{ color: C.slateLight }}>
-                  One-time payment · No hidden fees
+                  {form.shopName || "Shop"} · one-time payment
                 </div>
               </div>
               <div className="text-2xl font-bold sb-display" style={{ color: C.navy }}>
@@ -1799,37 +1871,120 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
             </div>
 
             <div className="text-xs font-semibold sb-body mb-2" style={{ color: C.slate }}>
-              Choose payment method
+              Payment method
             </div>
-            <div className="flex flex-col gap-2 mb-7">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-5">
               {[
-                { k: "upi", label: "UPI", sub: "PhonePe, Google Pay, Paytm", Icon: Wallet },
-                { k: "card", label: "Debit / Credit card", sub: "Visa, Mastercard, RuPay", Icon: CreditCard },
-                { k: "netbanking", label: "Net banking", sub: "All major banks", Icon: Landmark },
+                { k: "cash", label: "Cash", sub: "Collect cash by hand", Icon: Banknote, on: !payCfg || payCfg.cash },
+                { k: "upi", label: "UPI", sub: "Scan Slotb QR & pay", Icon: Smartphone, on: !payCfg || (payCfg.upi && (payCfg.upiQr || payCfg.upiId)) },
               ].map((m) => (
                 <button
                   key={m.k}
-                  onClick={() => setMethod(m.k)}
-                  className="flex items-center gap-3 rounded-xl px-4 py-3 text-left"
+                  data-testid={`pay-${m.k}`}
+                  disabled={!m.on}
+                  onClick={() => { setMethod(m.k); setPayConfirmed(false); setErrorMsg(""); }}
+                  className="flex items-center gap-3 rounded-xl px-4 py-3.5 text-left"
                   style={{
-                    background: C.white,
-                    border: `1.5px solid ${method === m.k ? C.navy : C.line}`,
+                    background: m.on ? C.white : C.sky,
+                    border: `1.5px solid ${method === m.k && m.on ? C.navy : C.line}`,
+                    opacity: m.on ? 1 : 0.55,
+                    cursor: m.on ? "pointer" : "not-allowed",
                   }}
                 >
                   <div
                     className="w-4 h-4 rounded-full flex items-center justify-center shrink-0"
-                    style={{ border: `1.5px solid ${method === m.k ? C.navy : C.slateLight}` }}
+                    style={{ border: `1.5px solid ${method === m.k && m.on ? C.navy : C.slateLight}` }}
                   >
-                    {method === m.k && <div className="w-2 h-2 rounded-full" style={{ background: C.navy }} />}
+                    {method === m.k && m.on && <div className="w-2 h-2 rounded-full" style={{ background: C.navy }} />}
                   </div>
-                  <m.Icon size={17} color={C.slate} />
-                  <div>
+                  <m.Icon size={18} color={C.slate} />
+                  <div className="min-w-0">
                     <div className="text-sm font-semibold sb-body" style={{ color: C.ink }}>{m.label}</div>
-                    <div className="text-xs sb-body" style={{ color: C.slateLight }}>{m.sub}</div>
+                    <div className="text-xs sb-body" style={{ color: C.slateLight }}>{m.on ? m.sub : "Not available"}</div>
                   </div>
                 </button>
               ))}
             </div>
+
+            {method === "upi" && payCfg && (
+              <div className="rounded-xl p-4 mb-5" style={{ border: `1px solid ${C.line}` }}>
+                <div className="flex flex-col sm:flex-row gap-4 items-center sm:items-start">
+                  {payCfg.upiQr ? (
+                    <img data-testid="upi-qr" src={payCfg.upiQr} alt="Slotb UPI QR code" className="w-52 h-52 object-contain rounded-lg shrink-0" style={{ background: C.white, border: `1px solid ${C.line}` }} />
+                  ) : (
+                    <div className="w-52 h-52 rounded-lg flex items-center justify-center text-xs sb-body text-center px-4 shrink-0" style={{ background: C.sky, color: C.slateLight }}>
+                      QR code is not added yet. Use the UPI ID instead.
+                    </div>
+                  )}
+                  <div className="flex-1 min-w-0 w-full">
+                    <div className="text-sm font-bold sb-body" style={{ color: C.ink }}>Ask the owner to scan and pay ₹{fee}</div>
+                    <div className="text-xs sb-body mt-1" style={{ color: C.slate }}>Any UPI app: PhonePe, Google Pay, Paytm, BHIM.</div>
+                    {payCfg.upiId && (
+                      <div className="mt-3 rounded-lg px-3 py-2.5 flex items-center gap-2" style={{ background: C.sky }}>
+                        <div className="min-w-0 flex-1">
+                          <div className="text-[11px] sb-body" style={{ color: C.slateLight }}>UPI ID · {payCfg.payee}</div>
+                          <div className="text-sm font-semibold sb-mono truncate" style={{ color: C.ink }}>{payCfg.upiId}</div>
+                        </div>
+                        <button
+                          onClick={() => { try { navigator.clipboard.writeText(payCfg.upiId); } catch { /* ignore */ } }}
+                          className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
+                          style={{ background: C.white, border: `1px solid ${C.line}` }}
+                          title="Copy UPI ID"
+                        >
+                          <Copy size={14} color={C.navy} />
+                        </button>
+                      </div>
+                    )}
+                    {payCfg.upiId && (
+                      <a
+                        href={`upi://pay?pa=${encodeURIComponent(payCfg.upiId)}&pn=${encodeURIComponent(payCfg.payee)}&am=${fee}&cu=INR&tn=${encodeURIComponent(`Slotb onboarding ${serverAppId || ""}`.trim())}`}
+                        className="mt-2 inline-flex items-center gap-2 text-xs font-bold sb-body px-3 py-2 rounded-lg"
+                        style={{ background: C.navy, color: C.white }}
+                      >
+                        <Smartphone size={14} /> Pay with UPI app on this phone
+                      </a>
+                    )}
+                  </div>
+                </div>
+                <div className="mt-4">
+                  <div className="text-xs font-semibold sb-body mb-1.5" style={{ color: C.slate }}>UPI transaction ID (UTR)</div>
+                  <input
+                    data-testid="upi-utr"
+                    value={utr}
+                    onChange={(e) => { setUtr(e.target.value); setErrorMsg(""); }}
+                    placeholder="12-digit number from the payment app"
+                    className="w-full rounded-xl px-4 py-3 text-sm sb-mono outline-none"
+                    style={{ border: `1px solid ${C.line}`, color: C.ink }}
+                    maxLength={30}
+                  />
+                  <div className="text-[11px] sb-body mt-1" style={{ color: C.slateLight }}>
+                    After paying, the owner's app shows a UPI transaction ID / UTR. Type it here.
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {method === "cash" && (
+              <div className="rounded-xl px-4 py-3.5 mb-5 flex items-start gap-3" style={{ background: C.amberSoft }}>
+                <Banknote size={18} color={C.amber} className="mt-0.5 shrink-0" />
+                <div className="text-xs sb-body" style={{ color: C.amber }}>
+                  Collect <b>₹{fee}</b> in cash from the owner. This amount will be added to your collected payments, and you need to hand it over to Slotb.
+                </div>
+              </div>
+            )}
+
+            <label className="flex items-start gap-3 mb-5 cursor-pointer select-none">
+              <input
+                data-testid="pay-confirm"
+                type="checkbox"
+                checked={payConfirmed}
+                onChange={(e) => { setPayConfirmed(e.target.checked); setErrorMsg(""); }}
+                className="mt-0.5 w-4 h-4 shrink-0"
+              />
+              <span className="text-sm sb-body" style={{ color: C.ink }}>
+                {method === "cash" ? `I have collected ₹${fee} in cash` : `I have checked that ₹${fee} has been received on UPI`}
+              </span>
+            </label>
 
             {errorMsg && (
               <div className="mb-4 rounded-xl px-4 py-3 flex items-start gap-2.5 text-xs sb-body" style={{ background: C.dangerSoft, color: C.danger }}>
@@ -1838,11 +1993,11 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
               </div>
             )}
 
-            <PrimaryButton full icon={ArrowRight} onClick={handleSubmitApplication} disabled={submitting}>
-              {submitting ? "Confirming payment..." : `Pay ₹${fee} and activate`}
+            <PrimaryButton full icon={ArrowRight} onClick={handleSubmitApplication} disabled={submitting || !payConfirmed || (method === "upi" && cleanUtr.length < 6)}>
+              {submitting ? "Confirming payment..." : `Confirm ₹${fee} received and activate`}
             </PrimaryButton>
             <div className="text-center text-xs sb-body mt-3 flex items-center justify-center gap-1.5" style={{ color: C.slateLight }}>
-              <ShieldCheck size={13} /> 100% secure payment
+              <ShieldCheck size={13} /> The partner login is emailed to the owner right after this step
             </div>
           </Card>
         )}
@@ -1858,14 +2013,15 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
                 Partner is live on SlotB
               </h2>
               <p className="text-sm sb-body mt-2 max-w-sm" style={{ color: C.slate }}>
-                {form.shopName || "This partner"} can now receive bookings. The QR mapping is permanent and cannot be reassigned.
+                {form.shopName || "This partner"} can now receive {noQr ? "jobs" : "bookings"}.{assignedQr ? " The QR mapping is permanent and cannot be reassigned." : ""}
               </p>
 
               <div className="w-full rounded-xl px-5 py-4 mt-7 text-left" style={{ background: C.sky }}>
                 <Row k="Shop" v={form.shopName || "—"} />
-                <Row k="QR ID" v={assignedQr} mono />
-                <Row k="Transaction ID" v={"#" + txnId} mono />
-                <Row k="Amount paid" v={`₹${fee}`} last={!paymentResult?.partner_id} />
+                {assignedQr && <Row k="QR ID" v={assignedQr} mono />}
+                <Row k="Payment" v={method === "cash" ? "Cash" : "UPI"} />
+                {method === "upi" && <Row k="UPI transaction ID" v={cleanUtr} mono />}
+                <Row k="Amount received" v={`₹${fee}`} last={!paymentResult?.partner_id} />
                 {paymentResult?.partner_id && <Row k="Partner login ID" v={paymentResult.partner_id} mono last />}
               </div>
 
@@ -1915,6 +2071,8 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
                   setQrInput("");
                   setQrLookup(null);
                   setAssignedQr(null);
+                  setUtr("");
+                  setPayConfirmed(false);
                   setErrorMsg("");
                   setEmailVerified(false);
                   setOtpSent(false);
