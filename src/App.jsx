@@ -459,7 +459,7 @@ function AmenityChips({ category, value, onChange }) {
   };
   return (
     <div>
-      <div className="text-xs font-semibold sb-body mb-2" style={{ color: C.slate }}>Suvidhayein (customer app me dikhengi)</div>
+      <div className="text-xs font-semibold sb-body mb-2" style={{ color: C.slate }}>Amenities (shown in the customer app)</div>
       <div className="flex flex-wrap gap-2 mb-2">
         {all.map((a) => {
           const on = list.includes(a);
@@ -476,7 +476,7 @@ function AmenityChips({ category, value, onChange }) {
       <div className="flex gap-2">
         <div className="flex-1 flex items-center rounded-xl px-3 py-2.5" style={{ background: C.sky, border: `1px solid ${C.line}` }}>
           <input value={custom} onChange={(e) => setCustom(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); add(); } }}
-            placeholder="Aur kuch? Jaise: Cabin, Printer" className="w-full bg-transparent outline-none text-sm sb-body" style={{ color: C.ink }} />
+            placeholder="Add more, e.g. Cabin, Printer" className="w-full bg-transparent outline-none text-sm sb-body" style={{ color: C.ink }} />
         </div>
         <button type="button" onClick={add} className="inline-flex items-center gap-1 rounded-xl px-3 text-xs font-semibold sb-body"
           style={{ background: C.white, color: C.navy, border: `1px solid ${C.line}` }}>
@@ -515,7 +515,7 @@ function DetailFields({ group, category, detail, setDetail }) {
           <TextField label="Batch timings" icon={Clock} value={dv("batchTimings")} onChange={d("batchTimings")} placeholder="6–8 AM, 5–7 PM" />
         </div>
         <AmenityChips category="Gym" value={detail.amenities} onChange={(v) => setDetail({ ...detail, amenities: v })} />
-        <TextField label="Admission fee (ek baar, ₹)" icon={IndianRupee} value={dv("admissionFee")} onChange={d("admissionFee")} type="number" placeholder="0" />
+        <TextField label="Admission fee (one-time, ₹)" icon={IndianRupee} value={dv("admissionFee")} onChange={d("admissionFee")} type="number" placeholder="0" />
         <RepeatRows
           label="Membership plans"
           addLabel="Add plan"
@@ -536,7 +536,7 @@ function DetailFields({ group, category, detail, setDetail }) {
       <div className="flex flex-col gap-4 mt-4">
         <div className="grid sm:grid-cols-2 gap-4">
           <TextField label="Total seats" icon={Users} value={dv("totalSeats")} onChange={d("totalSeats")} type="number" placeholder="60" />
-          <TextField label="Admission fee (ek baar, ₹)" icon={IndianRupee} value={dv("admissionFee")} onChange={d("admissionFee")} type="number" placeholder="0" />
+          <TextField label="Admission fee (one-time, ₹)" icon={IndianRupee} value={dv("admissionFee")} onChange={d("admissionFee")} type="number" placeholder="0" />
         </div>
         <AmenityChips category="Library" value={detail.amenities} onChange={(v) => setDetail({ ...detail, amenities: v })} />
         <RepeatRows
@@ -573,11 +573,11 @@ function DetailFields({ group, category, detail, setDetail }) {
 function Sidebar({ area, setArea, username, onLogout }) {
   const partnerNav = [
     { key: "onboard", label: "New Onboarding", Icon: PlusCircle },
-    { key: "profile", label: "Meri Profile", Icon: CircleUser },
+    { key: "profile", label: "My Profile", Icon: CircleUser },
   ];
   const opsNav = [
     { key: "applications", label: "Applications", Icon: ListChecks },
-    { key: "myqr", label: "Mere QR", Icon: QrCode },
+    { key: "myqr", label: "My QR Codes", Icon: QrCode },
     { key: "payments", label: "Payment collected", Icon: Wallet },
   ];
   return (
@@ -612,7 +612,7 @@ function Sidebar({ area, setArea, username, onLogout }) {
       </nav>
 
       <div className="mb-2 px-1 text-[11px] font-semibold tracking-wide sb-body" style={{ color: "#5C6693" }}>
-        Mera kaam
+        My Work
       </div>
       <nav className="flex flex-col gap-1">
         {opsNav.map((n) => (
@@ -681,7 +681,7 @@ function TopBar({ title, sub, profile, onProfile }) {
           </p>
         )}
       </div>
-      <button onClick={onProfile} className="flex items-center gap-2 pl-1 shrink-0" title="Meri profile">
+      <button onClick={onProfile} className="flex items-center gap-2 pl-1 shrink-0" title="My profile">
         <div
           className="w-9 h-9 rounded-full flex items-center justify-center font-semibold text-sm sb-body"
           style={{ background: C.orangeSoft, color: C.orangeDeep }}
@@ -1082,7 +1082,7 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
   const handleSendOtp = async () => {
     const email = (form.email || "").trim();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      setOtpMsg("Pehle sahi email daaliye");
+      setOtpMsg("Please enter a valid email address");
       return;
     }
     setOtpBusy(true);
@@ -1090,9 +1090,9 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
     try {
       await sendOnboardingOtp(email);
       setOtpSent(true);
-      setOtpMsg("OTP bhej diya gaya — email check kijiye");
+      setOtpMsg("OTP sent successfully. Please check your email.");
     } catch (e) {
-      setOtpMsg(e.message || "OTP bhejne me dikkat");
+      setOtpMsg(e.message || "Could not send OTP. Please try again.");
     } finally {
       setOtpBusy(false);
     }
@@ -1107,7 +1107,7 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
       setEmailVerified(true);
       setOtpMsg("");
     } catch (e) {
-      setOtpMsg(e.message || "Galat ya expired OTP");
+      setOtpMsg(e.message || "Invalid or expired OTP");
     } finally {
       setOtpBusy(false);
     }
@@ -1338,12 +1338,12 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
                     onChange={(name) =>
                       setForm((f) => ({ ...f, category: name, salonType: "", detail: {}, selectedServices: [] }))
                     }
-                    placeholder="Kaunsa business onboard kar rahe hain?"
+                    placeholder="Select a business category"
                     options={categories.map((c) => ({ value: c.name, label: c.name }))}
                   />
                   {categories.length === 0 && (
                     <div className="text-xs sb-body mt-1.5" style={{ color: C.danger }}>
-                      Categories load nahi ho paayin. Page refresh karein — na aaye to backend check karein.
+                      Could not load categories. Please refresh the page. If the problem continues, check the backend.
                     </div>
                   )}
                 </>
@@ -1413,7 +1413,7 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
                     className="px-4 rounded-xl text-sm font-semibold sb-body shrink-0"
                     style={{ background: C.navy, color: C.white, opacity: otpBusy ? 0.6 : 1 }}
                   >
-                    {otpBusy ? "..." : otpSent ? "Resend" : "Send OTP"}
+                    {otpBusy ? "..." : otpSent ? "Resend OTP" : "Send OTP"}
                   </button>
                 )}
               </div>
@@ -1486,7 +1486,7 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
             {!emailVerified && (
               <div className="mt-5 rounded-xl px-4 py-3 flex items-start gap-2.5 text-xs sb-body" style={{ background: C.amberSoft, color: C.amber }}>
                 <AlertTriangle size={15} className="mt-0.5 shrink-0" />
-                Continue karne ke liye email OTP se verify karna zaroori hai.
+                Please verify the email address with OTP to continue.
               </div>
             )}
             <div className="flex justify-end mt-8">
@@ -1537,7 +1537,7 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
             {!form.location && (
               <div className="mt-4 rounded-xl px-4 py-3 flex items-start gap-2.5 text-xs sb-body" style={{ background: C.amberSoft, color: C.amber }}>
                 <AlertTriangle size={15} className="mt-0.5 shrink-0" />
-                Continue karne ke liye dukaan ki location lagana zaroori hai.
+                Please set the shop location to continue.
               </div>
             )}
             <div className="flex justify-between mt-8">
@@ -1645,12 +1645,12 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
 
             <div className="rounded-xl p-4 mb-4" style={{ background: C.sky, border: `1px solid ${C.line}` }}>
               <div className="flex items-center justify-between mb-2.5">
-                <div className="text-xs font-bold sb-body" style={{ color: C.ink }}>Aapki ID wale QR ({myQr.length})</div>
+                <div className="text-xs font-bold sb-body" style={{ color: C.ink }}>QR codes on your ID ({myQr.length})</div>
                 {myQrLoading && <Loader2 size={14} className="animate-spin" color={C.slateLight} />}
               </div>
               {myQr.length === 0 && !myQrLoading ? (
                 <div className="text-xs sb-body" style={{ color: C.slate }}>
-                  Aapki ID par koi QR nahi hai. Pehle "Mere QR" me jaakar apne paas wale QR scan karke ID par chadhaiye.
+                  There are no QR codes on your ID. Go to "My QR Codes" first and scan the QR codes you have to add them to your ID.
                 </div>
               ) : (
                 <div className="flex flex-wrap gap-2">
@@ -1763,7 +1763,7 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
                 Back
               </GhostButton>
               <div className="text-xs sb-body self-center text-right" style={{ color: C.slateLight }}>
-                Sirf aapki ID wala QR lagega
+                Only QR codes on your ID can be used
               </div>
             </div>
           </Card>
@@ -2028,7 +2028,7 @@ function ApplicationsArea({ applications, onOpenApplication }) {
     <div>
       <div className="flex flex-wrap gap-3 mb-7">
         <StatCard label="Total applications" value={counts.total} tone="navy" />
-        <StatCard label="Kaam baaki" value={counts.pending} tone="amber" />
+        <StatCard label="Pending" value={counts.pending} tone="amber" />
         <StatCard label="Complete" value={counts.approved} tone="success" />
         <StatCard label="Rejected" value={counts.rejected} tone="danger" />
       </div>
@@ -2110,7 +2110,7 @@ function ApplicationsArea({ applications, onOpenApplication }) {
                   className="text-xs font-bold sb-body px-4 py-2.5 rounded-lg flex items-center gap-1.5"
                   style={{ background: C.navy, color: C.white }}
                 >
-                  {a.qr ? "Payment baaki" : "Kaam shuru karein"}
+                  {a.qr ? "Payment pending" : "Start onboarding"}
                   <ChevronRight size={13} />
                 </button>
               )}
@@ -2316,7 +2316,7 @@ function AreaError({ msg, onRetry }) {
     <div className="rounded-xl px-4 py-3 flex items-start gap-2.5 text-xs sb-body" style={{ background: C.dangerSoft, color: C.danger }}>
       <AlertTriangle size={15} className="mt-0.5 shrink-0" />
       <div className="flex-1">{msg}</div>
-      {onRetry && <button onClick={onRetry} className="font-bold underline">Dobara</button>}
+      {onRetry && <button onClick={onRetry} className="font-bold underline">Retry</button>}
     </div>
   );
 }
@@ -2346,17 +2346,17 @@ function ProfileArea({ me, onReload, onGo }) {
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
-        <MiniStat label="Meri applications" value={s.applications ?? 0} sub={`${s.in_progress ?? 0} chal rahi`} />
-        <MiniStat label="Complete hui" value={s.completed ?? 0} tone="success" />
-        <MiniStat label="QR mere paas" value={s.qr_in_hand ?? 0} tone="orange" sub={`${s.qr_used ?? 0} dukaan par lage`} />
-        <MiniStat label="Payment collected" value={inr(s.collected)} tone="success" sub={`Aaj ${inr(s.collected_today)}`} />
+        <MiniStat label="My applications" value={s.applications ?? 0} sub={`${s.in_progress ?? 0} in progress`} />
+        <MiniStat label="Completed" value={s.completed ?? 0} tone="success" />
+        <MiniStat label="QR codes in hand" value={s.qr_in_hand ?? 0} tone="orange" sub={`${s.qr_used ?? 0} installed at shops`} />
+        <MiniStat label="Payment collected" value={inr(s.collected)} tone="success" sub={`Today ${inr(s.collected_today)}`} />
       </div>
 
       <div className="grid sm:grid-cols-3 gap-3">
         {[
-          ["Nayi onboarding", "Dukaan onboard karein", PlusCircle, "onboard"],
-          ["Mere QR", "QR scan karke ID par chadhayein", QrCode, "myqr"],
-          ["Payment collected", "Kitna collect kiya", Wallet, "payments"],
+          ["New onboarding", "Onboard a new shop", PlusCircle, "onboard"],
+          ["My QR Codes", "Scan QR codes to add them to your ID", QrCode, "myqr"],
+          ["Payment collected", "View the payments you have collected", Wallet, "payments"],
         ].map(([t, sub, Icon, k]) => (
           <button key={k} onClick={() => onGo(k)} className="rounded-2xl p-4 text-left flex items-center gap-3" style={{ background: C.white, border: `1px solid ${C.line}` }}>
             <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style={{ background: C.sky }}><Icon size={18} color={C.navy} /></div>
@@ -2403,7 +2403,7 @@ function ClaimScannerModal({ onClose, onClaimed }) {
           try { navigator.vibrate && navigator.vibrate(60); } catch { /* ignore */ }
           try {
             const r = await claimQr(code.data);
-            setLog((l) => [{ ok: true, text: r.message || `${r.qr_id} jud gaya` }, ...l].slice(0, 6));
+            setLog((l) => [{ ok: true, text: r.message || `${r.qr_id} added to your ID` }, ...l].slice(0, 6));
             onClaimed();
           } catch (e) {
             setLog((l) => [{ ok: false, text: e.message }, ...l].slice(0, 6));
@@ -2421,7 +2421,7 @@ function ClaimScannerModal({ onClose, onClaimed }) {
     <div className="fixed inset-0 z-50 flex items-center justify-center px-4" style={{ background: "rgba(11,22,66,0.85)" }}>
       <div className="rounded-2xl overflow-hidden w-full max-w-md" style={{ background: C.navyDeep }}>
         <div className="flex items-center justify-between px-4 py-3.5">
-          <div className="text-sm font-semibold sb-body" style={{ color: C.white }}>QR scan karke ID par chadhayein</div>
+          <div className="text-sm font-semibold sb-body" style={{ color: C.white }}>Scan QR codes to add them to your ID</div>
           <button onClick={onClose} className="w-8 h-8 rounded-full flex items-center justify-center" style={{ background: "#16224F" }} aria-label="Close">
             <X size={15} color={C.white} />
           </button>
@@ -2437,7 +2437,7 @@ function ClaimScannerModal({ onClose, onClaimed }) {
           {error && <div className="absolute inset-0 flex items-center justify-center px-6 text-center text-xs sb-body" style={{ color: C.white }}>{error}</div>}
         </div>
         <div className="px-4 py-3 text-center text-xs sb-body" style={{ color: "#8B93B8" }}>
-          Ek ke baad ek QR camera ke saamne laaiye. Har QR apne aap ID par chadh jayega.
+          Hold each QR code in front of the camera, one at a time. Each QR code will be added to your ID automatically.
         </div>
         {log.length > 0 && (
           <div className="px-4 pb-4 flex flex-col gap-1.5">
@@ -2483,23 +2483,23 @@ function MyQrArea({ onChanged }) {
     <div>
       {err && <div className="mb-4"><AreaError msg={err} onRetry={load} /></div>}
       <div className="grid grid-cols-2 gap-3 mb-6">
-        <MiniStat label="Mere paas (lagane ke liye)" value={c.available ?? 0} tone="orange" />
-        <MiniStat label="Dukaan par lag chuke" value={c.assigned ?? 0} tone="success" />
+        <MiniStat label="In hand (ready to install)" value={c.available ?? 0} tone="orange" />
+        <MiniStat label="Installed at shops" value={c.assigned ?? 0} tone="success" />
       </div>
 
       <div className="rounded-2xl p-5 mb-6" style={{ background: C.white, border: `1px solid ${C.line}` }}>
-        <div className="text-sm font-semibold sb-body mb-1" style={{ color: C.ink }}>Apne paas wale QR ID par chadhayein</div>
+        <div className="text-sm font-semibold sb-body mb-1" style={{ color: C.ink }}>Add your QR codes to your ID</div>
         <div className="text-xs sb-body mb-4" style={{ color: C.slateLight }}>
-          Sirf wahi QR chadhega jo admin ki list me hai aur kisi aur ke paas nahi hai. Dukaan par sirf aapki ID wala QR lagega.
+          Only QR codes that are in the admin list and not held by anyone else can be added. Only QR codes on your ID can be installed at a shop.
         </div>
         <button onClick={() => setScan(true)} className="w-full flex items-center justify-center gap-2 text-sm font-bold sb-body py-3.5 rounded-xl mb-3" style={{ background: C.navy, color: C.white }}>
-          <ScanLine size={16} /> Camera se QR scan karein
+          <ScanLine size={16} /> Scan QR with camera
         </button>
         <div className="flex items-center gap-2 rounded-xl px-3.5 py-2.5" style={{ background: C.sky, border: `1px solid ${C.line}` }}>
           <QrCode size={16} color={C.slateLight} />
-          <input value={manual} onChange={(e) => setManual(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addManual()} placeholder="Ya QR ID likhein: QR-SB-000237" className="w-full bg-transparent outline-none text-sm sb-mono uppercase" style={{ color: C.ink }} />
+          <input value={manual} onChange={(e) => setManual(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addManual()} placeholder="Or enter QR ID: QR-SB-000237" className="w-full bg-transparent outline-none text-sm sb-mono uppercase" style={{ color: C.ink }} />
           <button onClick={addManual} disabled={busy || !manual.trim()} className="text-xs font-bold sb-body px-3 py-2 rounded-lg shrink-0" style={{ background: C.navy, color: C.white, opacity: busy || !manual.trim() ? 0.5 : 1 }}>
-            {busy ? "..." : "Jodein"}
+            {busy ? "..." : "Add"}
           </button>
         </div>
         {msg && (
@@ -2510,20 +2510,20 @@ function MyQrArea({ onChanged }) {
       </div>
 
       <div className="flex gap-2 mb-4">
-        {[["available", `Mere paas (${c.available ?? 0})`], ["used", `Lag chuke (${(c.assigned ?? 0) + (c.damaged ?? 0)})`]].map(([k, l]) => (
+        {[["available", `In hand (${c.available ?? 0})`], ["used", `Used (${(c.assigned ?? 0) + (c.damaged ?? 0)})`]].map(([k, l]) => (
           <button key={k} onClick={() => setTab(k)} className="px-4 py-2.5 rounded-xl text-sm font-semibold sb-body" style={{ background: tab === k ? C.navy : C.white, color: tab === k ? C.white : C.slate, border: `1px solid ${tab === k ? C.navy : C.line}` }}>{l}</button>
         ))}
       </div>
       <div className="rounded-2xl overflow-hidden" style={{ border: `1px solid ${C.line}`, background: C.white }}>
         {list.length === 0 ? (
-          <div className="text-center py-12 text-sm sb-body" style={{ color: C.slateLight }}>{tab === "available" ? "Abhi aapki ID par koi QR nahi. Upar se scan karke jodiye." : "Abhi koi QR dukaan par nahi laga."}</div>
+          <div className="text-center py-12 text-sm sb-body" style={{ color: C.slateLight }}>{tab === "available" ? "No QR codes on your ID yet. Scan above to add them." : "No QR codes have been installed at a shop yet."}</div>
         ) : list.map((q, i) => (
           <div key={q.id} className="flex items-center gap-3 px-5 py-3.5" style={{ borderTop: i ? `1px solid ${C.line}` : "none" }}>
             <div className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0" style={{ background: C.sky }}><QrCode size={16} color={C.navy} /></div>
             <div className="flex-1 min-w-0">
               <div className="text-sm font-semibold sb-mono" style={{ color: C.ink }}>{q.id}</div>
               <div className="text-xs sb-body truncate" style={{ color: C.slateLight }}>
-                {q.status === "assigned" ? `${q.shop_name || "Dukaan"} · ${fmtWhen(q.assigned_at)}` : `${q.category || "QR"} · ID par ${fmtWhen(q.held_at)}`}
+                {q.status === "assigned" ? `${q.shop_name || "Shop"} · ${fmtWhen(q.assigned_at)}` : `${q.category || "QR"} · Added to ID ${fmtWhen(q.held_at)}`}
               </div>
             </div>
             <StatusPill status={q.status} />
@@ -2552,15 +2552,15 @@ function PaymentsArea() {
     <div>
       {err && <div className="mb-4"><AreaError msg={err} onRetry={load} /></div>}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
-        <MiniStat label="Aaj" value={inr(t.today)} tone="success" />
-        <MiniStat label="Is mahine" value={inr(t.month)} tone="success" />
-        <MiniStat label="Total collected" value={inr(t.total)} tone="navy" sub={`${t.count || 0} dukaan`} />
+        <MiniStat label="Today" value={inr(t.today)} tone="success" />
+        <MiniStat label="This month" value={inr(t.month)} tone="success" />
+        <MiniStat label="Total collected" value={inr(t.total)} tone="navy" sub={`${t.count || 0} shops`} />
         <MiniStat label="Cash / UPI" value={`${inr((t.by_method || {}).cash)} / ${inr((t.by_method || {}).upi)}`} tone="orange" />
       </div>
       <div className="rounded-2xl overflow-hidden" style={{ border: `1px solid ${C.line}`, background: C.white }}>
-        <div className="px-5 py-3 text-xs font-semibold sb-body" style={{ background: C.sky, color: C.slateLight }}>Har payment</div>
+        <div className="px-5 py-3 text-xs font-semibold sb-body" style={{ background: C.sky, color: C.slateLight }}>All payments</div>
         {items.length === 0 ? (
-          <div className="text-center py-12 text-sm sb-body" style={{ color: C.slateLight }}>Abhi tak koi payment collect nahi hua.</div>
+          <div className="text-center py-12 text-sm sb-body" style={{ color: C.slateLight }}>No payments collected yet.</div>
         ) : items.map((p, i) => (
           <div key={p.id} className="flex items-center gap-3 px-5 py-3.5" style={{ borderTop: i ? `1px solid ${C.line}` : "none" }}>
             <div className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0" style={{ background: C.successSoft }}><Receipt size={16} color={C.success} /></div>
@@ -2599,7 +2599,7 @@ function HistoryModal({ app, onClose }) {
         <div className="overflow-y-auto sb-scroll px-5 py-4">
           <div className="rounded-xl px-3.5 py-3 mb-4 flex items-start gap-2.5 text-xs sb-body" style={{ background: C.successSoft, color: C.success }}>
             <Lock size={14} className="shrink-0 mt-px" />
-            Ye application complete ho chuki hai. Ab isme badlav nahi ho sakta, sirf detail aur history dekh sakte hain.
+            This application is complete and can no longer be edited. You can only view its details and history.
           </div>
           {err && <AreaError msg={err} />}
           {!data && !err && <AreaLoader />}
@@ -2812,11 +2812,11 @@ export default function App() {
 
   const titles = {
     onboard: { title: "New partner onboarding", sub: "Register a shop, verify it, and activate a physical QR — end to end." },
-    applications: { title: "Applications", sub: "Aapko assign hui dukaanein. Complete hone ke baad sirf history dikhti hai." },
+    applications: { title: "Applications", sub: "Shops assigned to you. Once an application is complete, only its history is shown." },
     qrbank: { title: "QR bank", sub: "Every printed QR code and the shop it's permanently mapped to." },
-    profile: { title: "Meri profile", sub: "Aapki details aur ab tak ka kaam." },
-    myqr: { title: "Mere QR", sub: "Jo QR aapke paas hain, unhe scan karke apni ID par chadhaiye." },
-    payments: { title: "Payment collected", sub: "Aapne dukaanon se kitni onboarding fee collect ki." },
+    profile: { title: "My profile", sub: "Your details and work so far." },
+    myqr: { title: "My QR codes", sub: "Scan the QR codes you have to add them to your ID." },
+    payments: { title: "Payment collected", sub: "Onboarding fees you have collected from shops." },
   };
 
   const currentTitle =
@@ -2869,7 +2869,7 @@ export default function App() {
         {[
           { k: "onboard", label: "Onboard", Icon: PlusCircle },
           { k: "applications", label: "Applications", Icon: ListChecks },
-          { k: "myqr", label: "Mere QR", Icon: QrCode },
+          { k: "myqr", label: "My QR", Icon: QrCode },
           { k: "payments", label: "Payment", Icon: Wallet },
           { k: "profile", label: "Profile", Icon: CircleUser },
         ].map((n) => (
