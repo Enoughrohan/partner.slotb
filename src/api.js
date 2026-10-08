@@ -126,6 +126,11 @@ function normalizeApplication(row) {
     latitude: row.latitude != null ? Number(row.latitude) : null,
     longitude: row.longitude != null ? Number(row.longitude) : null,
     locationAccuracy: row.location_accuracy != null ? Number(row.location_accuracy) : null,
+    // ghar ki service: kitne km tak / kaun se area
+    coverageKm: row.coverage_km != null ? Number(row.coverage_km) : null,
+    coverageAreas: row.coverage_areas || "",
+    planLabel: row.plan_label || null,
+    planEnds: row.plan_ends || null,
   };
 }
 
@@ -174,6 +179,9 @@ export async function createApplication(form, photoFrontUrl, photoInsideUrl, sou
     latitude: form.location ? form.location.lat : null,
     longitude: form.location ? form.location.lng : null,
     location_accuracy: form.location ? form.location.accuracy : null,
+    // ghar ki service: kahan tak service denge
+    coverage_km: form.coverageKm ? Number(form.coverageKm) : null,
+    coverage_areas: form.coverageAreas || "",
   };
   const res = await fetch(`${API_BASE}/api_partner_applications.php`, {
     method: "POST",
@@ -277,13 +285,35 @@ export async function assignQrToApplication(id, qrId, shopName) {
   return handle(res);
 }
 
-export async function markApplicationPaid(id, txnId, amount, method) {
+// planId = Admin > Category Prices ka package (0 = purana ek-hi onboarding fee). Rs 0 package = free trial.
+export async function markApplicationPaid(id, txnId, amount, method, planId = null) {
   const res = await fetch(`${API_BASE}/api_partner_applications.php`, {
     method: "PUT",
     headers: authHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify({ id, action: "mark_paid", txn_id: txnId, amount, method }),
+    body: JSON.stringify({ id, action: "mark_paid", txn_id: txnId, amount, method, plan_id: planId }),
   });
   return handle(res);
+}
+
+// Ghar ki service: coverage (partner app se aayi application ke liye bhi)
+export async function updateApplicationCoverage(id, km, areas) {
+  const res = await fetch(`${API_BASE}/api_partner_applications.php`, {
+    method: "PUT",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ id, action: "update_coverage", coverage_km: km, coverage_areas: areas || "" }),
+  });
+  return handle(res);
+}
+
+/** Category ke package (Admin > Category Prices). Na ho to purana fee (id 0). */
+export async function fetchOnboardingPlans(category) {
+  try {
+    const res = await fetch(`${API_BASE}/api_public_content.php?action=onboarding_plans&category=${encodeURIComponent(category || "")}`);
+    const d = await res.json();
+    return Array.isArray(d?.plans) ? d.plans : [];
+  } catch {
+    return [];
+  }
 }
 
 /* ------------------------------ QR Bank -------------------------------- */
