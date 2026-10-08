@@ -51,6 +51,9 @@ import {
   BadgeCheck,
   Receipt,
   CircleUser,
+  Gift,
+  MapPinned,
+  CalendarClock,
 } from "lucide-react";
 import jsQR from "jsqr";
 import ShopLocationPicker from "./ShopLocation";
@@ -80,6 +83,8 @@ import {
   fetchApplicationHistory,
   fetchOnboardingFee,
   fetchPaymentConfig,
+  fetchOnboardingPlans,
+  updateApplicationCoverage,
 } from "./api";
 
 /* ---------------------------------------------------------------------- */
@@ -298,6 +303,64 @@ const SALON_TYPES = [
   { value: "womens", label: "Women's" },
   { value: "unisex", label: "Unisex" },
 ];
+
+/* Ghar ki service: partner kitni door tak kaam karega + kaun se area */
+const COVERAGE_KM = [3, 5, 10, 15, 25];
+function CoverageField({ km, areas, onKm, onAreas }) {
+  const custom = km && !COVERAGE_KM.includes(Number(km));
+  return (
+    <div className="mt-5 rounded-xl p-4" style={{ background: C.sky, border: `1px solid ${C.line}` }} data-testid="coverage">
+      <div className="flex items-center gap-2 mb-1">
+        <MapPinned size={16} color={C.navy} />
+        <div className="text-sm font-semibold sb-body" style={{ color: C.ink }}>Service coverage area</div>
+      </div>
+      <div className="text-xs sb-body mb-3" style={{ color: C.slate }}>
+        How far will the partner travel for a job? New jobs are shown only within this distance.
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {COVERAGE_KM.map((k) => {
+          const on = Number(km) === k;
+          return (
+            <button
+              key={k}
+              type="button"
+              data-testid={`coverage-${k}`}
+              onClick={() => onKm(k)}
+              className="px-3.5 py-2 rounded-xl text-sm font-semibold sb-body"
+              style={{ background: on ? C.navy : C.white, color: on ? C.white : C.slate, border: `1px solid ${on ? C.navy : C.line}` }}
+            >
+              {k} km
+            </button>
+          );
+        })}
+        <div className="flex items-center gap-1.5 rounded-xl px-3 py-1.5" style={{ background: C.white, border: `1px solid ${custom ? C.navy : C.line}` }}>
+          <input
+            data-testid="coverage-custom"
+            value={custom ? km : ""}
+            onChange={(e) => onKm(e.target.value.replace(/\D/g, "").slice(0, 3))}
+            placeholder="Other"
+            inputMode="numeric"
+            className="w-14 bg-transparent outline-none text-sm sb-body"
+            style={{ color: C.ink }}
+          />
+          <span className="text-xs sb-body" style={{ color: C.slateLight }}>km</span>
+        </div>
+      </div>
+      <div className="mt-3 flex items-center gap-2.5 rounded-xl px-3.5 py-3" style={{ background: C.white, border: `1px solid ${C.line}` }}>
+        <MapPin size={16} color={C.slateLight} />
+        <input
+          data-testid="coverage-areas"
+          value={areas || ""}
+          onChange={(e) => onAreas(e.target.value)}
+          placeholder="Areas covered (optional), e.g. Lohiya Nagar, Station Road"
+          className="w-full bg-transparent outline-none text-sm sb-body"
+          style={{ color: C.ink }}
+          maxLength={300}
+        />
+      </div>
+    </div>
+  );
+}
 
 function SelectField({ label, icon, value, onChange, options, placeholder = "Select…" }) {
   return (
@@ -1024,6 +1087,9 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
   const [payCfg, setPayCfg] = useState(null);
   const [utr, setUtr] = useState("");
   const [payConfirmed, setPayConfirmed] = useState(false);
+  // Category ke package (Admin > Category Prices): jaise Library / Gym = Free trial 30 din, 4 months Rs 399
+  const [plans, setPlans] = useState(null);
+  const [planId, setPlanId] = useState(null);
   useEffect(() => {
     fetchPaymentConfig().then((c) => {
       setFee(c.fee);
@@ -1049,6 +1115,8 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
           services: resumeApplication.services || "",
           detail: resumeApplication.detail || {},
           selectedServices: [],
+          coverageKm: resumeApplication.coverageKm || "",
+          coverageAreas: resumeApplication.coverageAreas || "",
           location:
             resumeApplication.latitude != null && resumeApplication.longitude != null
               ? {
@@ -1071,6 +1139,8 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
           services: "",
           detail: {},
           selectedServices: [],
+          coverageKm: "",
+          coverageAreas: "",
           location: null,
         }
   );
@@ -1311,8 +1381,9 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
         const created = await createApplication(form, frontUrl, insideUrl, "ops_console");
         appId = created.id;
         setServerAppId(appId);
-      } else if (form.location) {
-        await updateApplicationLocation(appId, form.location);
+      } else {
+        if (form.location) await updateApplicationLocation(appId, form.location);
+        if (Number(form.coverageKm) > 0) await updateApplicationCoverage(appId, Number(form.coverageKm), form.coverageAreas);
       }
       setStep(4);
     } catch (e) {
@@ -1323,9 +1394,49 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
   };
 
   const cleanUtr = utr.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+
+  // payment step par category ke package lao
+  useEffect(() => {
+    if (step !== 4 || !form.category) return;
+    let alive = true;
+    fetchOnboardingPlans(form.category).then((list) => {
+      if (!alive) return;
+      setPlans(list);
+      setPlanId((cur) => (list.some((p) => p.id === cur) ? cur : list.length ? list[0].id : null));
+    });
+    return () => {
+      alive = false;
+    };
+  }, [step, form.category]);
+  const selPlan = (plans || []).find((p) => p.id === planId) || null;
+  const isTrial = !!(selPlan && selPlan.is_trial);
+  const due = selPlan ? Number(selPlan.price) : fee;
+  const showPlanPicker = !!plans && plans.length > 0 && !(plans.length === 1 && plans[0].is_default);
+  const validTill = (days) => {
+    if (!days) return null;
+    const d = new Date();
+    d.setDate(d.getDate() + Number(days));
+    return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+  };
+
   const handleSubmitApplication = async () => {
     if (!serverAppId) {
       setErrorMsg("Application is not saved yet. Please go back and try again.");
+      return;
+    }
+    if (isTrial) {
+      setSubmitting(true);
+      setErrorMsg("");
+      try {
+        const result = await markApplicationPaid(serverAppId, "", 0, "trial", selPlan.id);
+        setPaymentResult(result);
+        onApplicationsChanged();
+        setStep(5);
+      } catch (e) {
+        setErrorMsg("Could not activate the free trial: " + e.message);
+      } finally {
+        setSubmitting(false);
+      }
       return;
     }
     if (method === "upi" && cleanUtr.length < 6) {
@@ -1333,14 +1444,14 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
       return;
     }
     if (!payConfirmed) {
-      setErrorMsg(method === "cash" ? `Please confirm that you have collected ₹${fee} in cash.` : "Please confirm that the payment has been received.");
+      setErrorMsg(method === "cash" ? `Please confirm that you have collected ₹${due} in cash.` : "Please confirm that the payment has been received.");
       return;
     }
     setSubmitting(true);
     setErrorMsg("");
     try {
       const appId = serverAppId;
-      const result = await markApplicationPaid(appId, method === "upi" ? cleanUtr : "", fee, method);
+      const result = await markApplicationPaid(appId, method === "upi" ? cleanUtr : "", due, method, selPlan ? selPlan.id : null);
       setPaymentResult(result);
       onApplicationsChanged();
       setStep(5);
@@ -1537,6 +1648,9 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
                 setDetail={(d) => set("detail")(d)}
               />
             )}
+            {noQr && (
+              <CoverageField km={form.coverageKm} areas={form.coverageAreas} onKm={set("coverageKm")} onAreas={set("coverageAreas")} />
+            )}
             {!emailVerified && (
               <div className="mt-5 rounded-xl px-4 py-3 flex items-start gap-2.5 text-xs sb-body" style={{ background: C.amberSoft, color: C.amber }}>
                 <AlertTriangle size={15} className="mt-0.5 shrink-0" />
@@ -1547,7 +1661,7 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
               <PrimaryButton
                 icon={ArrowRight}
                 onClick={() => setStep(1)}
-                disabled={!form.category || !form.shopName.trim() || !form.owner.trim() || !form.phone.trim() || !emailVerified}
+                disabled={!form.category || !form.shopName.trim() || !form.owner.trim() || !form.phone.trim() || !emailVerified || (noQr && !(Number(form.coverageKm) > 0))}
               >
                 Continue
               </PrimaryButton>
@@ -1647,6 +1761,12 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
               }
             />
             <PreviewRow label="Hours" value={form.hours} />
+            {noQr && (
+              <PreviewRow
+                label="Coverage"
+                value={`Up to ${form.coverageKm || "-"} km${form.coverageAreas ? ` · ${form.coverageAreas}` : ""}`}
+              />
+            )}
             {form.selectedServices.length > 0 && (
               <PreviewRow
                 label="Services"
@@ -1838,7 +1958,11 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
         {/* STEP 4 — payment (Cash / UPI) */}
         {step === 4 && (
           <Card>
-            <SectionHeading eyebrow={`Step ${totalSteps} of ${totalSteps}`} title="Collect activation fee" sub="One-time fee. No monthly charges. Choose how the shop owner is paying." />
+            <SectionHeading
+              eyebrow={`Step ${totalSteps} of ${totalSteps}`}
+              title={showPlanPicker ? "Choose a package" : "Collect activation fee"}
+              sub={showPlanPicker ? "Pick the Slotb package the owner wants, then collect the payment if needed." : "One-time fee. No monthly charges. Choose how the shop owner is paying."}
+            />
 
             {assignedQr ? (
               <div className="rounded-xl px-4 py-3.5 flex items-center gap-3 mb-5" style={{ background: C.successSoft }}>
@@ -1856,20 +1980,71 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
               </div>
             ) : null}
 
-            <div className="flex items-center justify-between rounded-xl px-4 py-4 mb-6" style={{ background: C.sky }}>
-              <div>
-                <div className="text-sm font-semibold sb-body" style={{ color: C.ink }}>
-                  Partner activation fee
+            {plans === null ? (
+              <div className="flex items-center gap-2 text-sm sb-body mb-6" style={{ color: C.slateLight }}>
+                <Loader2 size={15} className="animate-spin" /> Loading packages…
+              </div>
+            ) : showPlanPicker ? (
+              <div className="grid gap-2.5 mb-6" data-testid="plan-list">
+                {plans.map((p) => {
+                  const on = p.id === planId;
+                  const free = !!p.is_trial;
+                  return (
+                    <button
+                      key={p.id}
+                      type="button"
+                      data-testid={`plan-${p.id}`}
+                      onClick={() => { setPlanId(p.id); setPayConfirmed(false); setErrorMsg(""); }}
+                      className="flex items-center gap-3 rounded-xl px-4 py-3.5 text-left"
+                      style={{ background: on ? C.white : C.sky, border: `1.5px solid ${on ? C.navy : C.line}` }}
+                    >
+                      <div className="w-4 h-4 rounded-full flex items-center justify-center shrink-0" style={{ border: `1.5px solid ${on ? C.navy : C.slateLight}` }}>
+                        {on && <div className="w-2 h-2 rounded-full" style={{ background: C.navy }} />}
+                      </div>
+                      <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style={{ background: free ? C.successSoft : C.orangeSoft }}>
+                        {free ? <Gift size={18} color={C.success} /> : <CalendarClock size={18} color={C.orangeDeep} />}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-bold sb-body" style={{ color: C.ink }}>{p.label}</div>
+                        <div className="text-xs sb-body" style={{ color: C.slateLight }}>
+                          {p.validity_days ? `${p.validity_text} · valid till ${validTill(p.validity_days)}` : p.note || "One-time"}
+                        </div>
+                      </div>
+                      <div className="text-lg font-bold sb-display shrink-0" style={{ color: free ? C.success : C.navy }}>
+                        {free ? "Free" : `₹${Number(p.price).toLocaleString("en-IN")}`}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="flex items-center justify-between rounded-xl px-4 py-4 mb-6" style={{ background: C.sky }}>
+                <div>
+                  <div className="text-sm font-semibold sb-body" style={{ color: C.ink }}>
+                    Partner activation fee
+                  </div>
+                  <div className="text-xs sb-body mt-0.5" style={{ color: C.slateLight }}>
+                    {form.shopName || "Shop"} · one-time payment
+                  </div>
                 </div>
-                <div className="text-xs sb-body mt-0.5" style={{ color: C.slateLight }}>
-                  {form.shopName || "Shop"} · one-time payment
+                <div className="text-2xl font-bold sb-display" style={{ color: C.navy }}>
+                  ₹{due}
                 </div>
               </div>
-              <div className="text-2xl font-bold sb-display" style={{ color: C.navy }}>
-                ₹{fee}
-              </div>
-            </div>
+            )}
 
+            {isTrial && (
+              <div className="rounded-xl px-4 py-3.5 mb-5 flex items-start gap-3" style={{ background: C.successSoft }} data-testid="trial-note">
+                <Gift size={18} color={C.success} className="mt-0.5 shrink-0" />
+                <div className="text-xs sb-body" style={{ color: C.success }}>
+                  No payment needed. {form.shopName || "The partner"} gets Slotb free for <b>{selPlan.validity_text}</b>
+                  {selPlan.validity_days ? <> (till <b>{validTill(selPlan.validity_days)}</b>)</> : null}. The Slotb team will contact the owner before the trial ends.
+                </div>
+              </div>
+            )}
+
+            {!isTrial && (
+            <>
             <div className="text-xs font-semibold sb-body mb-2" style={{ color: C.slate }}>
               Payment method
             </div>
@@ -1917,7 +2092,7 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
                     </div>
                   )}
                   <div className="flex-1 min-w-0 w-full">
-                    <div className="text-sm font-bold sb-body" style={{ color: C.ink }}>Ask the owner to scan and pay ₹{fee}</div>
+                    <div className="text-sm font-bold sb-body" style={{ color: C.ink }}>Ask the owner to scan and pay ₹{due}</div>
                     <div className="text-xs sb-body mt-1" style={{ color: C.slate }}>Any UPI app: PhonePe, Google Pay, Paytm, BHIM.</div>
                     {payCfg.upiId && (
                       <div className="mt-3 rounded-lg px-3 py-2.5 flex items-center gap-2" style={{ background: C.sky }}>
@@ -1937,7 +2112,7 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
                     )}
                     {payCfg.upiId && (
                       <a
-                        href={`upi://pay?pa=${encodeURIComponent(payCfg.upiId)}&pn=${encodeURIComponent(payCfg.payee)}&am=${fee}&cu=INR&tn=${encodeURIComponent(`Slotb onboarding ${serverAppId || ""}`.trim())}`}
+                        href={`upi://pay?pa=${encodeURIComponent(payCfg.upiId)}&pn=${encodeURIComponent(payCfg.payee)}&am=${due}&cu=INR&tn=${encodeURIComponent(`Slotb onboarding ${serverAppId || ""}`.trim())}`}
                         className="mt-2 inline-flex items-center gap-2 text-xs font-bold sb-body px-3 py-2 rounded-lg"
                         style={{ background: C.navy, color: C.white }}
                       >
@@ -1968,7 +2143,7 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
               <div className="rounded-xl px-4 py-3.5 mb-5 flex items-start gap-3" style={{ background: C.amberSoft }}>
                 <Banknote size={18} color={C.amber} className="mt-0.5 shrink-0" />
                 <div className="text-xs sb-body" style={{ color: C.amber }}>
-                  Collect <b>₹{fee}</b> in cash from the owner. This amount will be added to your collected payments, and you need to hand it over to Slotb.
+                  Collect <b>₹{due}</b> in cash from the owner. This amount will be added to your collected payments, and you need to hand it over to Slotb.
                 </div>
               </div>
             )}
@@ -1982,9 +2157,11 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
                 className="mt-0.5 w-4 h-4 shrink-0"
               />
               <span className="text-sm sb-body" style={{ color: C.ink }}>
-                {method === "cash" ? `I have collected ₹${fee} in cash` : `I have checked that ₹${fee} has been received on UPI`}
+                {method === "cash" ? `I have collected ₹${due} in cash` : `I have checked that ₹${due} has been received on UPI`}
               </span>
             </label>
+            </>
+            )}
 
             {errorMsg && (
               <div className="mb-4 rounded-xl px-4 py-3 flex items-start gap-2.5 text-xs sb-body" style={{ background: C.dangerSoft, color: C.danger }}>
@@ -1993,8 +2170,13 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
               </div>
             )}
 
-            <PrimaryButton full icon={ArrowRight} onClick={handleSubmitApplication} disabled={submitting || !payConfirmed || (method === "upi" && cleanUtr.length < 6)}>
-              {submitting ? "Confirming payment..." : `Confirm ₹${fee} received and activate`}
+            <PrimaryButton
+              full
+              icon={isTrial ? Gift : ArrowRight}
+              onClick={handleSubmitApplication}
+              disabled={submitting || plans === null || (showPlanPicker && !selPlan) || (!isTrial && (!payConfirmed || (method === "upi" && cleanUtr.length < 6)))}
+            >
+              {submitting ? (isTrial ? "Activating..." : "Confirming payment...") : isTrial ? "Activate free trial" : `Confirm ₹${due} received and activate`}
             </PrimaryButton>
             <div className="text-center text-xs sb-body mt-3 flex items-center justify-center gap-1.5" style={{ color: C.slateLight }}>
               <ShieldCheck size={13} /> The partner login is emailed to the owner right after this step
@@ -2019,9 +2201,10 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
               <div className="w-full rounded-xl px-5 py-4 mt-7 text-left" style={{ background: C.sky }}>
                 <Row k="Shop" v={form.shopName || "—"} />
                 {assignedQr && <Row k="QR ID" v={assignedQr} mono />}
-                <Row k="Payment" v={method === "cash" ? "Cash" : "UPI"} />
-                {method === "upi" && <Row k="UPI transaction ID" v={cleanUtr} mono />}
-                <Row k="Amount received" v={`₹${fee}`} last={!paymentResult?.partner_id} />
+                {selPlan && showPlanPicker && <Row k="Package" v={`${selPlan.label}${selPlan.validity_days ? ` · till ${validTill(selPlan.validity_days)}` : ""}`} />}
+                <Row k="Payment" v={isTrial ? "Free trial · no payment" : method === "cash" ? "Cash" : "UPI"} />
+                {!isTrial && method === "upi" && <Row k="UPI transaction ID" v={cleanUtr} mono />}
+                <Row k="Amount received" v={isTrial ? "Free" : `₹${due}`} last={!paymentResult?.partner_id} />
                 {paymentResult?.partner_id && <Row k="Partner login ID" v={paymentResult.partner_id} mono last />}
               </div>
 
@@ -2035,7 +2218,7 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
                 >
                   {paymentResult.welcome_email_sent ? <CheckCircle2 size={15} className="mt-0.5 shrink-0" /> : <AlertTriangle size={15} className="mt-0.5 shrink-0" />}
                   {paymentResult.welcome_email_sent
-                    ? "Login ID and password have been emailed to the partner."
+                    ? "Login ID, password and the Slotb welcome kit (PDF) have been emailed to the partner."
                     : "Partner account was created, but the welcome email could not be sent — check the shop's email address, then share the login ID manually if needed."}
                 </div>
               )}
@@ -2060,6 +2243,8 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
                     services: "",
                     detail: {},
                     selectedServices: [],
+                    coverageKm: "",
+                    coverageAreas: "",
                     location: null,
                   });
                   setFront(null);
@@ -2073,6 +2258,8 @@ function OnboardingArea({ onApplicationsChanged, onQrBankChanged, resumeApplicat
                   setAssignedQr(null);
                   setUtr("");
                   setPayConfirmed(false);
+                  setPlans(null);
+                  setPlanId(null);
                   setErrorMsg("");
                   setEmailVerified(false);
                   setOtpSent(false);
@@ -2448,7 +2635,7 @@ function fmtWhen(v) {
   if (isNaN(d)) return v;
   return d.toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: true });
 }
-const METHOD_LABEL = { upi: "UPI", cash: "Cash", razorpay: "Razorpay", bank: "Bank", other: "Other" };
+const METHOD_LABEL = { upi: "UPI", cash: "Cash", razorpay: "Razorpay", bank: "Bank", other: "Other", trial: "Free trial" };
 
 function MiniStat({ label, value, tone = "navy", sub }) {
   const fg = { navy: C.navy, success: C.success, amber: C.amber, orange: C.orangeDeep }[tone] || C.navy;
